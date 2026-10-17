@@ -1,0 +1,3 @@
+# Optional offline comparison only; the desktop app still uses Vosk.
+-r requirements-prototype.txt
+faster-whisper==1.2.1

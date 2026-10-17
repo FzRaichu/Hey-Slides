@@ -15,8 +15,8 @@ from app.commands import CommandParser
 from app.recognition import StreamingRecognizer, load_model
 
 
-def compare(path, profile="light"):
-    model = load_model(config.model_path(profile))
+def compare(path, profile="light", model=None):
+    model = load_model(config.model_path(profile)) if model is None else model
     decoders = {"unrestricted": StreamingRecognizer(model), "command_focused": CommandRecognizer(model)}
     parsers = {name: CommandParser() for name in decoders}
     output = {name: [] for name in decoders}
@@ -35,6 +35,7 @@ def compare(path, profile="light"):
         output[name].append({"text": event["text"], "eligible": eligible, "status": status,
                              "proposed_action": action, "target_slide": target,
                              "words": event["words"], "mean_score": event.get("mean_score"),
+                             "audio_processed_seconds": samples / 16000,
                              "finalized_at_eof": eof})
 
     with wave.open(str(path), "rb") as wav:

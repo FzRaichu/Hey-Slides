@@ -350,6 +350,42 @@ results or real-speaker WER.
   to determine whether the recognition problem is audio delivery, model mismatch,
   or both. Phase 7 remains incomplete.
 
+### Phase 7c recorded-audio evaluation, 17 October 2026
+
+The [evaluation report](report/Phase_7c_Evaluation.md) covers six real recordings
+(192.35 seconds), their live action logs, and a local Whisper base.en comparison.
+The latest recording executed next, previous, and goto 7. Earlier recordings
+remain inconsistent. On the only complete confirmed reference (12 words),
+unrestricted Vosk had 11 word errors and unrestricted Whisper had 3; focused
+Vosk had none on this command-only clip. This does not measure general speech
+accuracy. Whisper still missed wake phrases and omitted earlier speech in the
+longest clip, so the desktop recognizer has not been replaced.
+
+Optional offline evaluation setup, from the repository in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-evaluation.txt
+.\.venv\Scripts\python.exe -m scripts.download_whisper_evaluation
+$clips = Get-ChildItem logs/input-*.wav
+.\.venv\Scripts\python.exe -m scripts.benchmark_recognizers @($clips.FullName)
+.\.venv\Scripts\python.exe -m scripts.audit_recorded_sessions logs/session-YOUR-SESSION.jsonl
+```
+
+Downloading dependencies/model requires internet; decoding uses local model files
+only and uploads no recordings. The download pins the resolved Hub revision and
+checks the published model SHA256. If the Hub transfer helper stalls, retry with
+`$env:HF_HUB_DISABLE_XET = '1'` before the download command.
+The benchmark reads validated PCM WAVs directly into arrays, avoiding a PyAV file
+reader API incompatibility found in the evaluation environment.
+
+To score WER, pass `--references logs/evaluation-references.json`. Its JSON maps
+WAV basenames to objects with `text`, `confirmed: true`, and `complete: true`.
+Only provide a complete, human-confirmed transcript of the entire clip. Missing
+or partial references remain unscored. Raw hypotheses, references, audio hashes,
+and timing results stay in ignored `logs/`. Do not commit private recordings or
+transcripts. Offline proposed actions include EOF finalization and are not actual
+slide actions. Offline RTF is throughput, not proof of the 200 ms requirement.
+
 ## Phase commits
 
 The prototype baseline (Phases 2–5) is commit `8e272ec`. Phase 6 adds PowerPoint
