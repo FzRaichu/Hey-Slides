@@ -1,0 +1,7 @@
+# Langkah 1 — cukup ini dulu. Library deep learning (torch, transformers)
+# baru ditambahkan nanti di Tingkat T2/T3.
+numpy
+soundfile
+librosa
+scikit-learn
+sounddevice

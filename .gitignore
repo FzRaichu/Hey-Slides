@@ -1,0 +1,55 @@
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Python bytecode, test caches, and packaging output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Downloaded datasets, pretrained models, and generated feature arrays
+/data/
+/datasets/
+/models/
+*.tar.gz
+*.zip
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# Local transcripts, test recordings, feature exports, and runtime scratch files
+/logs/
+/.runtime-temp/
+/.report-build/
+*.log
+
+# Secrets and machine-specific environment configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+~$*
+*.swp
+*.swo
+
+# Keep source code, tests, requirements, README, and authored reports versioned.
