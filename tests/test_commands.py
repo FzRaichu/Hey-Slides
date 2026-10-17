@@ -53,6 +53,28 @@ class CommandTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             deck.apply("delete")
 
+    def test_numbered_slide_commands(self):
+        for n, (words, target) in enumerate([("five", 5), ("12", 12), ("one two", 12),
+                                             ("twenty five", 25), ("nineteen", 19),
+                                             ("ninety-nine", 99), ("one zero zero", 100)]):
+            decision = self.parser.accept(f"Hey Slides, go to slide {words}", str(n), n + 1)
+            self.assertEqual((decision.action, decision.target_slide), ("goto", target))
+
+    def test_invalid_numbered_commands_do_not_act(self):
+        for n, text in enumerate(["zero", "0", "1000", "five please", "one hundred",
+                                  "minus five", "five point five", "twenty zero"]):
+            self.assertIsNone(self.parser.accept(f"hey slides go to slide {text}", str(n), n + 1).action)
+
+    def test_goto_requires_prefix_and_valid_deck_number(self):
+        self.assertIsNone(self.parser.accept("go to slide five", "a", 1).action)
+        deck = SlideDeck()
+        self.assertTrue(deck.apply("goto", 5))
+        self.assertEqual(deck.index, 4)
+        for target in (0, 6, None, True):
+            with self.assertRaises(ValueError):
+                deck.apply("goto", target)
+            self.assertEqual(deck.index, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,22 @@ def transcribe(path, realtime=False):
     parser, deck = CommandParser(), SlideDeck()
     results, timings, audio = [], [], bytearray()
     processed_samples = 0
+
+    def record(event, at_eof=False):
+        decision = parser.accept(event["text"], str(len(results)), now=processed_samples / 16000)
+        result = {"text": event["text"], "action": decision.action,
+                  "target_slide": decision.target_slide, "status": decision.status,
+                  "words": event["words"]}
+        if decision.action:
+            try:
+                deck.apply(decision.action, decision.target_slide)
+            except ValueError as exc:
+                result.update(action=None, requested_action=decision.action,
+                              status="command rejected", error=str(exc))
+        if at_eof:
+            result["finalized_at_eof"] = True
+        results.append(result)
+
     began = time.perf_counter()
     with wave.open(str(path), "rb") as wav:
         if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getcomptype()) != (1, 2, 16000, "NONE"):
@@ -41,19 +57,11 @@ def transcribe(path, realtime=False):
             event = recognizer.feed(pcm)
             timings.append(event["decode_ms"])
             if event["kind"] == "final" and event["text"]:
-                decision = parser.accept(event["text"], str(len(results)), now=processed_samples / 16000)
-                if decision.action:
-                    deck.apply(decision.action)
-                results.append({"text": event["text"], "action": decision.action,
-                                "status": decision.status, "words": event["words"]})
+                record(event)
         tail = recognizer.finish()
         if tail["text"]:
             # EOF can finalize a real phrase. This is a file test, unlike microphone Stop.
-            decision = parser.accept(tail["text"], str(len(results)), now=processed_samples / 16000)
-            if decision.action:
-                deck.apply(decision.action)
-            results.append({"text": tail["text"], "action": decision.action,
-                            "status": decision.status, "words": tail["words"], "finalized_at_eof": True})
+            record(tail, at_eof=True)
     elapsed = time.perf_counter() - began
     samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / 32768
     features = ManualMFCC().extract(samples)

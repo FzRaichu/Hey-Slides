@@ -9,7 +9,10 @@ from app.config import MODEL_DIR
 def main():
     errors = []
     print("Python:", sys.version.split()[0])
-    for package in ("numpy", "vosk", "sounddevice"):
+    packages = ["numpy", "vosk", "sounddevice"]
+    if sys.platform == "win32":
+        packages.append("pywin32")
+    for package in packages:
         try:
             print(package + ":", importlib.metadata.version(package))
         except importlib.metadata.PackageNotFoundError:

@@ -11,6 +11,7 @@ import numpy as np
 
 from app import config
 from app.commands import CommandParser, SlideDeck
+from app.powerpoint import PowerPointAdapter, PowerPointError, PowerPointCommandError
 from app.session import MicrophoneSession
 
 
@@ -26,7 +27,7 @@ BG, CARD, INK, MUTED, ACCENT = "#edf1f5", "#ffffff", "#14273c", "#53697e", "#087
 
 
 class Prototype:
-    def __init__(self, root):
+    def __init__(self, root, powerpoint=None):
         self.root = root
         root.title("Hey Slides | University Speech Recognition Prototype")
         root.geometry("1180x850")
@@ -34,6 +35,9 @@ class Prototype:
         root.configure(bg=BG)
         self.parser = CommandParser()
         self.deck = SlideDeck(count=len(SLIDES))
+        self.powerpoint = powerpoint or PowerPointAdapter()
+        self.powerpoint_state = None
+        self.target = tk.StringVar(value="Demo slides")
         self.session = MicrophoneSession()
         self.listening = False
         self.active_session = ""
@@ -79,6 +83,17 @@ class Prototype:
         self.refresh_button = ttk.Button(controls, text="Refresh inputs", command=self.refresh_devices)
         self.refresh_button.pack(side="left")
         tk.Label(controls, text="English / offline", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="right")
+        target_controls = tk.Frame(outer, bg=BG)
+        target_controls.pack(fill="x", pady=(0, 10))
+        tk.Label(target_controls, text="Control target", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
+        self.target_box = ttk.Combobox(target_controls, textvariable=self.target, state="readonly",
+                                      values=("Demo slides", "PowerPoint"), width=17)
+        self.target_box.pack(side="left")
+        self.target_box.bind("<<ComboboxSelected>>", lambda event: self.change_target())
+        self.connect_button = ttk.Button(target_controls, text="Connect / refresh PowerPoint", command=self.connect_powerpoint)
+        self.connect_button.pack(side="left", padx=8)
+        tk.Label(target_controls, text="Open a slideshow first. Target changes stop listening.", bg=BG,
+                 fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=6, uniform="body")
@@ -86,7 +101,8 @@ class Prototype:
         body.rowconfigure(0, weight=1)
         left = tk.Frame(body, bg=INK, padx=24, pady=22)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        tk.Label(left, text="PRESENTATION PREVIEW", bg=INK, fg="#6dd8ca", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.preview_caption = tk.Label(left, text="PRESENTATION PREVIEW", bg=INK, fg="#6dd8ca", font=("Segoe UI", 9, "bold"))
+        self.preview_caption.pack(anchor="w")
         self.slide_kicker = tk.Label(left, bg=INK, fg="#a7bbcf", font=("Segoe UI", 11), anchor="w")
         self.slide_kicker.pack(fill="x", pady=(30, 14))
         self.slide_title = tk.Label(left, bg=INK, fg="white", font=("Segoe UI", 29, "bold"), anchor="w", justify="left")
@@ -166,6 +182,9 @@ class Prototype:
 
     def start(self):
         try:
+            if self.target.get() == "PowerPoint":
+                self.powerpoint_state = self.powerpoint.snapshot()
+                self.show_slide()
             self.parser.reset()
             self.session.start(self.devices.get(self.device.get()))
             self.active_session = self.session.session_id
@@ -178,7 +197,41 @@ class Prototype:
             self.command_status.set("Command prefix: Hey Slides")
             self.log("start", device=self.device.get(), session_id=self.active_session)
         except Exception as exc:
+            if isinstance(exc, PowerPointError):
+                self.powerpoint_state = None
+                self.show_slide()
             self.status.set(str(exc))
+
+    def change_target(self):
+        if self.listening:
+            self.stop()
+        self.parser.reset()
+        self.powerpoint.disconnect()
+        self.powerpoint_state = None
+        self.show_slide()
+        self.command_status.set(f"Target: {self.target.get()} | command authorization reset")
+        self.log("target_changed", target=self.target.get())
+
+    def connect_powerpoint(self):
+        if self.target.get() != "PowerPoint":
+            self.target.set("PowerPoint")
+            self.change_target()
+        # Rebinding also invalidates microphone input captured for the previous show.
+        if self.listening:
+            self.stop()
+        self.parser.reset()
+        try:
+            self.powerpoint_state = self.powerpoint.connect()
+            self.status.set(f"Connected: {self.powerpoint_state.name} | microphone is off")
+            self.command_status.set("PowerPoint ready | click Start listening")
+            self.log("powerpoint_connected", presentation=self.powerpoint_state.name,
+                     slide=self.powerpoint_state.slide, count=self.powerpoint_state.count)
+        except PowerPointError as exc:
+            self.powerpoint_state = None
+            self.status.set(str(exc))
+            self.command_status.set("PowerPoint not connected | no action will be sent")
+            self.log("powerpoint_error", text=str(exc))
+        self.show_slide()
 
     def stop(self):
         self.listening = False
@@ -256,22 +309,44 @@ class Prototype:
         decision = self.parser.accept(text, utterance_id)
         messages = {"armed": "Hey Slides detected | say a command within 4 seconds",
                     "ordinary speech": "Ordinary speech | no slide action",
-                    "unrecognized command": "Command not supported | use next slide / previous slide"}
+                    "unrecognized command": "Use next slide, previous slide, or go to slide five"}
         self.command_status.set(messages.get(decision.status, decision.status))
         if decision.action:
-            self.apply_action(decision.action, source)
+            self.apply_action(decision.action, source, decision.target_slide)
         self.log("command_decision", text=text, source=source, status=decision.status,
-                 action=decision.action, utterance_id=utterance_id)
+                 action=decision.action, target_slide=decision.target_slide, utterance_id=utterance_id)
 
-    def apply_action(self, action, source):
-        moved = self.deck.apply(action)
+    def apply_action(self, action, source, target_slide=None):
+        target = self.target.get()
+        elapsed_ms = None
+        try:
+            if target == "PowerPoint":
+                result = self.powerpoint.apply(action, target_slide)
+                self.powerpoint_state = result.state
+                moved, slide, elapsed_ms = result.moved, result.state.slide, result.elapsed_ms
+            else:
+                moved = self.deck.apply(action, target_slide)
+                slide = self.deck.index + 1
+        except (PowerPointError, ValueError) as exc:
+            if target == "PowerPoint" and not isinstance(exc, PowerPointCommandError):
+                self.powerpoint_state = None
+            self.show_slide()
+            self.command_status.set(f"Action failed: {exc}")
+            self.actions.insert(0, f"{datetime.now():%H:%M:%S} [{target}] FAILED: {action}")
+            if self.actions.size() > 50:
+                self.actions.delete(50, "end")
+            self.log("slide_action_failed", target=target, action=action, source=source,
+                     target_slide=target_slide, error=str(exc))
+            return
         self.show_slide()
-        text = f"{action.upper()} -> slide {self.deck.index + 1}" + ("" if moved else " (boundary)")
+        text = f"{action.upper()} -> slide {slide}" + ("" if moved else " (unchanged)")
         self.command_status.set(text)
-        self.actions.insert(0, f"{datetime.now():%H:%M:%S}  [{source}]  {text}")
+        self.actions.insert(0, f"{datetime.now():%H:%M:%S}  [{target}/{source}]  {text}")
         if self.actions.size() > 50:
             self.actions.delete(50, "end")
-        self.log("slide_action", action=action, source=source, slide=self.deck.index + 1, moved=moved)
+        self.log("slide_action", target=target, action=action, source=source, slide=slide, moved=moved,
+                 target_slide=target_slide, adapter_ms=elapsed_ms,
+                 verification="PowerPoint slide-index read-back" if target == "PowerPoint" else "internal state")
 
     def manual_action(self, action):
         self.apply_action(action, "button")
@@ -285,6 +360,16 @@ class Prototype:
             self.parser.reset()
 
     def show_slide(self):
+        if self.target.get() == "PowerPoint":
+            self.preview_caption.configure(text="POWERPOINT STATUS / not a slide thumbnail")
+            state = self.powerpoint_state
+            self.slide_title.configure(text=f"Slide {state.slide}" if state else "Connect a slideshow.")
+            self.slide_kicker.configure(text=state.name if state else "Windows desktop PowerPoint")
+            self.slide_body.configure(text=("Displayed slide index confirmed by PowerPoint. Say Hey Slides, next slide, previous slide, or go to slide five."
+                                             if state else "Open your presentation and start its slideshow. Then click Connect / refresh PowerPoint. Commands never fall back to the demo viewer."))
+            self.slide_number.set(f"{state.slide:02d} / {state.count:02d}" if state else "-- / --")
+            return
+        self.preview_caption.configure(text="PRESENTATION PREVIEW")
         title, kicker, body = SLIDES[self.deck.index]
         self.slide_title.configure(text=title)
         self.slide_kicker.configure(text=kicker)
@@ -325,6 +410,7 @@ class Prototype:
     def close(self):
         self.listening = False
         self.session.stop()
+        self.powerpoint.disconnect()
         if self._log_file is not None:
             self._log_file.close()
         self.root.destroy()
