@@ -11,6 +11,12 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(self.parser.accept("HEY SLIDES, next slide!", "a", 1).action, "next")
         self.assertEqual(self.parser.accept("Hey Slides, previous slide.", "b", 2).action, "previous")
 
+    def test_plural_slide_phrases_keep_prefix_requirement(self):
+        self.assertEqual(self.parser.accept("hey slides next slides", "a", 1).action, "next")
+        self.assertEqual(self.parser.accept("hey slides previous slides", "b", 2).action, "previous")
+        self.assertIsNone(self.parser.accept("next slides", "c", 3).action)
+        self.assertIsNone(self.parser.accept("a slight max lights", "d", 4).action)
+
     def test_ordinary_speech_and_embedded_prefix_do_not_act(self):
         for n, text in enumerate(["next slide", "The next slide shows our results",
                                   "I said hey slides next slide", "hey slides next slideshow",

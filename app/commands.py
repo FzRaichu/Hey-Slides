@@ -74,7 +74,8 @@ class CommandParser:
             return Decision("ordinary speech")
         # A prefix authorizes only the following complete utterance.
         self.armed_until = 0.0
-        actions = {"next slide": "next", "previous slide": "previous"}
+        actions = {"next slide": "next", "next slides": "next",
+                   "previous slide": "previous", "previous slides": "previous"}
         action = actions.get(command)
         if command.startswith("go to slide "):
             target = slide_number(command[len("go to slide "):])

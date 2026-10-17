@@ -50,6 +50,12 @@ def main():
         ui.poll()
         assert ui.deck.index == 0
         ui.draw_features(ManualMFCC().extract(np.zeros(16000)).mfcc)
+        result = ManualMFCC().extract(np.zeros(16000))
+        ui.session.events.put({"session_id": "test", "kind": "features", "mfcc": result.mfcc,
+                               "vector": result.vector, "rms": 0.2, "peak": 1.0,
+                               "clipped_fraction": 0.02, "mfcc_ms": 1.0})
+        ui.poll()
+        assert "clipping" in ui.audio_quality.get()
         root.update()
         assert ui.slide_number.get() == "01 / 05"
         # Explicit PowerPoint target with a deterministic injected COM-like fixture.

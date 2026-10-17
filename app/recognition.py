@@ -9,7 +9,10 @@ def load_model(path):
     from vosk import Model, SetLogLevel
     path = Path(path)
     if not (path / "am" / "final.mdl").is_file():
-        raise FileNotFoundError("ASR model not installed. Run: python -m scripts.download_model")
+        from app.config import MODEL_PROFILES
+        profile = next((key for key, item in MODEL_PROFILES.items() if item["name"] == path.name), None)
+        suffix = f" --profile {profile}" if profile else ""
+        raise FileNotFoundError(f"ASR model not installed at {path}. Run: python -m scripts.download_model{suffix}")
     SetLogLevel(-1)
     return Model(str(path))
 

@@ -18,18 +18,20 @@ class MicrophoneSession:
         self._stop = threading.Event()
         self._thread = None
         self._model = None
+        self._model_profile = None
         self.session_id = ""
 
     @property
     def running(self):
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, device=None):
+    def start(self, device=None, model_profile=config.DEFAULT_MODEL_PROFILE):
         if self.running:
             raise RuntimeError("Previous audio session is still stopping. Try again shortly.")
         self._stop.clear()
         self.session_id = uuid.uuid4().hex
-        self._thread = threading.Thread(target=self._run, args=(device,), daemon=True)
+        model_dir = config.model_path(model_profile)
+        self._thread = threading.Thread(target=self._run, args=(device, model_profile, model_dir), daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -38,8 +40,10 @@ class MicrophoneSession:
     def _emit(self, kind, **payload):
         self.events.put({"kind": kind, "session_id": self.session_id, **payload})
 
-    def _run(self, device):
-        audio = queue.Queue(maxsize=12)
+    def _run(self, device, model_profile, model_dir):
+        profile_settings = config.MODEL_PROFILES[model_profile]
+        audio = queue.Queue(maxsize=profile_settings["queue_blocks"])
+        max_age_ms = profile_settings["max_queue_ms"]
         discontinuity = threading.Event()
 
         def callback(indata, frames, timing, status):
@@ -54,9 +58,12 @@ class MicrophoneSession:
 
         try:
             import sounddevice as sd
-            self._emit("status", text="Loading local English model...")
-            if self._model is None:
-                self._model = load_model(config.MODEL_DIR)
+            self._emit("status", text=f"Loading {config.MODEL_PROFILES[model_profile]['label']}...")
+            if self._model is None or self._model_profile != model_profile:
+                # Release the previous model before loading another profile.
+                self._model = None
+                self._model = load_model(model_dir)
+                self._model_profile = model_profile
             if self._stop.is_set():
                 return
             recognizer = StreamingRecognizer(self._model, config.SAMPLE_RATE)
@@ -78,9 +85,11 @@ class MicrophoneSession:
                     except queue.Empty:
                         continue
                     age_ms = (time.perf_counter() - received_at) * 1000
-                    if age_ms > 500:
-                        raise RuntimeError("Audio queue fell behind by over 500 ms. Listening stopped to avoid delayed actions.")
+                    if age_ms > max_age_ms:
+                        raise RuntimeError(f"Audio queue fell behind by over {max_age_ms} ms. Try the Light English model or reduce CPU load.")
                     event = recognizer.feed(pcm)
+                    if (time.perf_counter() - received_at) * 1000 > max_age_ms:
+                        raise RuntimeError(f"Recognition exceeded the {max_age_ms} ms stale-audio limit. Try Light English or reduce CPU load.")
                     if discontinuity.is_set():
                         raise RuntimeError("Audio discontinuity detected. Listening stopped; no action was sent for this block.")
                     if self._stop.is_set():
@@ -98,7 +107,9 @@ class MicrophoneSession:
                         began = time.perf_counter()
                         features = extractor.extract(rolling)
                         self._emit("features", mfcc=features.mfcc, vector=features.vector,
-                                   rms=features.rms, mfcc_ms=(time.perf_counter() - began) * 1000)
+                                   rms=features.rms, peak=float(np.max(np.abs(rolling))),
+                                   clipped_fraction=float(np.mean(np.abs(rolling) >= 0.999)),
+                                   mfcc_ms=(time.perf_counter() - began) * 1000)
                         last_features = now
             # Preserve the final text on Stop, but never execute its unfinished command.
             tail = recognizer.finish()

@@ -18,8 +18,8 @@ from app.features import ManualMFCC
 from app.recognition import StreamingRecognizer, load_model
 
 
-def transcribe(path, realtime=False):
-    model = load_model(config.MODEL_DIR)
+def transcribe(path, realtime=False, profile=config.DEFAULT_MODEL_PROFILE):
+    model = load_model(config.model_path(profile))
     recognizer = StreamingRecognizer(model)
     parser, deck = CommandParser(), SlideDeck()
     results, timings, audio = [], [], bytearray()
@@ -65,7 +65,9 @@ def transcribe(path, realtime=False):
     elapsed = time.perf_counter() - began
     samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / 32768
     features = ManualMFCC().extract(samples)
-    return {"source": str(Path(path).resolve()), "mode": "realtime file replay" if realtime else "offline file decode",
+    return {"source": str(Path(path).resolve()), "model_profile": profile,
+            "model_name": config.MODEL_PROFILES[profile]["name"],
+            "mode": "realtime file replay" if realtime else "offline file decode",
             "audio_seconds": total_samples / 16000, "elapsed_seconds_excluding_model_load": elapsed,
             "decode_call_ms_median": float(np.median(timings)) if timings else None,
             "decode_call_ms_p95": float(np.percentile(timings, 95)) if timings else None,
@@ -81,8 +83,9 @@ def main():
     parser.add_argument("wav", type=Path)
     parser.add_argument("--realtime", action="store_true")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--profile", choices=config.MODEL_PROFILES, default=config.DEFAULT_MODEL_PROFILE)
     args = parser.parse_args()
-    result = transcribe(args.wav, args.realtime)
+    result = transcribe(args.wav, args.realtime, args.profile)
     output = json.dumps(result, indent=2)
     print(output)
     if args.output:

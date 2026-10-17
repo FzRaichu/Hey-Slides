@@ -63,7 +63,22 @@ def class_role(word: str) -> str:
 
 # Prototipe ASR pretrained: kosakata bebas, bukan classifier 23 kelas di atas.
 COMMAND_PREFIX = "hey slides"
-MODEL_NAME = "vosk-model-small-en-us-0.15"
+MODEL_PROFILES = {
+    "light": {"name": "vosk-model-small-en-us-0.15", "size_mb": 40,
+              "label": "Light English (40 MB)", "queue_blocks": 12, "max_queue_ms": 500},
+    "balanced": {"name": "vosk-model-en-us-0.22-lgraph", "size_mb": 128,
+                 "label": "Balanced English (experimental)", "queue_blocks": 48, "max_queue_ms": 1000},
+}
+DEFAULT_MODEL_PROFILE = "light"
+
+
+def model_path(profile=DEFAULT_MODEL_PROFILE):
+    if profile not in MODEL_PROFILES:
+        raise ValueError(f"Unknown ASR profile: {profile}")
+    return PROJECT_ROOT / "models" / MODEL_PROFILES[profile]["name"]
+
+
+MODEL_NAME = MODEL_PROFILES[DEFAULT_MODEL_PROFILE]["name"]
 MODEL_DIR = PROJECT_ROOT / "models" / MODEL_NAME
 MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
 LOG_DIR = PROJECT_ROOT / "logs"

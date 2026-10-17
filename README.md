@@ -21,6 +21,7 @@ processed locally. The microphone stays off until Start is clicked.
 
 - `Hey Slides, next slide`
 - `Hey Slides, previous slide`
+- `Hey Slides, next slides` / `Hey Slides, previous slides` (plural variants)
 - `Hey Slides, go to slide five`
 - `Hey Slides, go to slide one two` (slide 12)
 - Alternatively say `Hey Slides`, pause, then say `next slide` within four
@@ -76,12 +77,76 @@ python -m venv .venv
 & '.venv\Scripts\python.exe' -m app.main
 ```
 
-The official model download is about 40 MB; installation requires internet,
+The default Light English model download is about 40 MB; installation requires internet,
 but recognition does not. The app never downloads models automatically or sends
 audio to a cloud API. Use `requirements-prototype.txt` and `check_prototype` for
 this version. The original `requirements.txt`, dataset scripts, root planning
 documents, and Bab 1–3 draft describe the earlier MFCC/SVM direction and have
 not yet been consolidated or rewritten.
+
+## Recognition quality and model comparison (Phase 7a)
+
+The **ASR model** selector offers two unrestricted English recognizers:
+
+| Profile | Model | Download |
+|---|---|---|
+| Light English (default / original baseline) | vosk-model-small-en-us-0.15 | About 40 MB |
+| Balanced English (experimental) | vosk-model-en-us-0.22-lgraph | About 128 MB |
+
+Vosk publishes lower errors for the balanced model on its listed LibriSpeech and
+TED-LIUM benchmarks. This motivates trying it, but does not prove improvement
+on your accent, microphone, or room. It also costs more CPU/memory; the model
+download size is not its runtime memory usage. Both modes retain full English
+transcription; neither forces every utterance into our command vocabulary.
+
+**Live-stream caveat:** the balanced model passed offline decoding, but real-time
+synthetic callback replay on the development computer exceeded stale-audio limits,
+including a trial at 2500 ms. It is therefore experimental and is **not the new
+default or a validated fix**. Prefer offline recording comparison first. In live
+mode it may stop rather than execute a delayed action. The final limits are
+500 ms / 12 queued blocks for Light and 1000 ms / 48 blocks for Balanced;
+limits apply before and after decoding. These limits are safeguards, not achieved
+latencies. No claim of 200 ms compliance follows from either setting.
+
+Stop listening before changing models. The model is reloaded on the next Start.
+Missing models produce an installation instruction instead of silently falling
+back to another recognizer. To install either profile explicitly:
+
+```powershell
+& '.venv\Scripts\python.exe' -m scripts.download_model --profile balanced
+& '.venv\Scripts\python.exe' -m scripts.download_model --profile light
+```
+
+For the first real test, say **Hey Slides, next slide** as one phrase, then pause.
+Repeat with **previous slide**. Singular and plural slide commands are accepted,
+but the prefix is still required. Wrong words such as `next line` or `a slight`
+are not automatically rewritten into commands; guessing those could cause false
+actions. A correctly transcribed command can still be rejected if additional
+words are included in the same utterance, because the grammar remains strict.
+
+The input-level label reports RMS in dBFS. `quiet / no speech` below -40 dBFS and
+the near-clipping indicator are diagnostic heuristics, not calibrated loudness,
+SNR, or confidence scores. Silence naturally appears quiet. Check the level
+**while speaking**: persistently quiet speech suggests checking the selected
+microphone, distance, and Windows input gain. Clipping suggests reducing gain.
+Audio-level summaries and the selected model profile are included in local logs;
+raw microphone audio is still not recorded.
+
+When using Remote Desktop, ensure the selected input actually carries your
+forwarded microphone rather than the remote computer's room microphone. Compare
+with a direct local microphone test if possible. The application cannot infer
+this routing from a wrong transcript.
+
+For a repeatable comparison of the same real recording:
+
+```powershell
+& '.venv\Scripts\python.exe' -m scripts.transcribe_wav 'your-recording.wav' --profile light --output 'logs\light.json'
+& '.venv\Scripts\python.exe' -m scripts.transcribe_wav 'your-recording.wav' --profile balanced --output 'logs\balanced.json'
+```
+
+Compare reference text, command success, ordinary-speech false actions, and
+processing time. Swapping models is not training or fine-tuning. The separate
+manual MFCC branch remains separate and unchanged.
 
 ## Architecture and manual features
 
@@ -194,10 +259,25 @@ results or real-speaker WER.
 - This validates the adapter, not recognition of a real user's voice. The 200 ms
   requirement, accents/noise, and the manual-feature requirement still need evaluation.
 
+### Phase 7a engineering checks, 17 October 2026
+
+- Both official model profiles loaded and transcribed the same continuous
+  synthetic recording. The ordinary sentence produced no action, and next /
+  previous phrases produced the expected parser decisions with both models.
+  These samples do not establish that either model is better for the student.
+- Real-time callback replay exposed unacceptable decode bursts for the balanced
+  model. Light remains the default; the balanced model is an offline comparison
+  candidate and experimental live option. Further model/decoder work is needed.
+- Model-path selection, reload-on-profile-change, plural command handling,
+  input indicators, and existing regression/UI checks passed.
+- Real recordings, comparison metrics, the user study, and latency evaluation
+  remain outstanding. Phase 7 as a whole is not complete.
+
 ## Phase commits
 
 The prototype baseline (Phases 2–5) is commit `8e272ec`. Phase 6 adds PowerPoint
-control and slide-number commands. Complete and check one phase, then commit
+control and slide-number commands. Phase 7a adds a selectable larger recognizer
+and audio diagnostics in response to real recognition failures. Complete and check one phase, then commit
 its code, tests, documentation, and AI log together. Exclude environments,
 downloaded models, recordings, and local logs. Phase 7 is evaluation; Phase 8 is
 final documentation and delivery. Allowing pretrained ASR is settled; lecturer

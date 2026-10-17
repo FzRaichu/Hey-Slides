@@ -50,6 +50,8 @@ class Prototype:
         self.slide_number = tk.StringVar()
         self.devices = {"Default microphone": None}
         self.device = tk.StringVar(value="Default microphone")
+        self.model_profile = tk.StringVar(value=config.MODEL_PROFILES[config.DEFAULT_MODEL_PROFILE]["label"])
+        self.audio_quality = tk.StringVar(value="Input level: -- | microphone is off")
         self._log_file = None
         self._build()
         self.show_slide()
@@ -94,6 +96,14 @@ class Prototype:
         self.connect_button.pack(side="left", padx=8)
         tk.Label(target_controls, text="Open a slideshow first. Target changes stop listening.", bg=BG,
                  fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
+        model_controls = tk.Frame(outer, bg=BG)
+        model_controls.pack(fill="x", pady=(0, 10))
+        tk.Label(model_controls, text="ASR model", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
+        self.model_box = ttk.Combobox(model_controls, textvariable=self.model_profile, state="readonly", width=27,
+                                     values=[item["label"] for item in config.MODEL_PROFILES.values()])
+        self.model_box.pack(side="left")
+        tk.Label(model_controls, textvariable=self.audio_quality, bg=BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(side="left", padx=12)
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=6, uniform="body")
@@ -186,16 +196,18 @@ class Prototype:
                 self.powerpoint_state = self.powerpoint.snapshot()
                 self.show_slide()
             self.parser.reset()
-            self.session.start(self.devices.get(self.device.get()))
+            profile = next(key for key, item in config.MODEL_PROFILES.items() if item["label"] == self.model_profile.get())
+            self.session.start(self.devices.get(self.device.get()), model_profile=profile)
             self.active_session = self.session.session_id
             self.listening = True
             self.start_button.configure(state="disabled")
             self.stop_button.configure(state="normal")
             self.device_box.configure(state="disabled")
             self.refresh_button.configure(state="disabled")
+            self.model_box.configure(state="disabled")
             self.status.set("Starting microphone...")
             self.command_status.set("Command prefix: Hey Slides")
-            self.log("start", device=self.device.get(), session_id=self.active_session)
+            self.log("start", device=self.device.get(), model_profile=profile, session_id=self.active_session)
         except Exception as exc:
             if isinstance(exc, PowerPointError):
                 self.powerpoint_state = None
@@ -268,6 +280,15 @@ class Prototype:
                     self.draw_features(event["mfcc"])
                     self.feature_status.set(f"Manual MFCC | 13 x {event['mfcc'].shape[1]} frames | 156 features | RMS {event['rms']:.4f}")
                     self._mfcc_ms = event["mfcc_ms"]
+                    dbfs = 20 * np.log10(max(event["rms"], 1e-6))
+                    note = "quiet / no speech" if dbfs < -40 else "level detected"
+                    if event.get("clipped_fraction", 0) > 0.001:
+                        note = "clipping: lower microphone gain"
+                    self.audio_quality.set(f"Input: {dbfs:.0f} dBFS | {note}")
+                    if getattr(self, "_last_audio_log", None) != int(datetime.now().timestamp()):
+                        self._last_audio_log = int(datetime.now().timestamp())
+                        self.log("audio_quality", rms=event["rms"], dbfs=float(dbfs),
+                                 peak=event.get("peak"), clipped_fraction=event.get("clipped_fraction"))
                 elif kind == "error":
                     self.listening = False
                     self.parser.reset()
@@ -280,7 +301,9 @@ class Prototype:
                     self.stop_button.configure(state="disabled")
                     self.device_box.configure(state="readonly")
                     self.refresh_button.configure(state="normal")
+                    self.model_box.configure(state="readonly")
                     self.partial.set("Microphone off")
+                    self.audio_quality.set("Input level: -- | microphone is off")
                     if not self.status.get().startswith("Error:"):
                         self.status.set("Ready | microphone is off")
         except queue.Empty:
