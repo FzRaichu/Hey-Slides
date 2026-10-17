@@ -22,7 +22,7 @@ class ModelProfileTests(unittest.TestCase):
              patch("sounddevice.check_input_settings"), \
              patch("sounddevice.RawInputStream", side_effect=make_stream), \
              patch("app.session.time.perf_counter", side_effect=[0.0, 0.0, 1.0]):
-            session._run(None, "light", config.model_path("light"))
+            session._run(None, "light", config.model_path("light"), command_assist=False)
         events = []
         while not session.events.empty():
             events.append(session.events.get_nowait())
@@ -47,7 +47,7 @@ class ModelProfileTests(unittest.TestCase):
              patch("sounddevice.RawInputStream", return_value=stream):
             for profile in ("light", "light", "balanced"):
                 session._stop.clear()
-                session._run(None, profile, config.model_path(profile))
+                session._run(None, profile, config.model_path(profile), command_assist=False)
             self.assertEqual(load.call_count, 2)
             self.assertEqual(load.call_args_list[0].args[0], config.model_path("light"))
             self.assertEqual(load.call_args_list[1].args[0], config.model_path("balanced"))

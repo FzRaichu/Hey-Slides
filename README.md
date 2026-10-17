@@ -22,6 +22,7 @@ processed locally. The microphone stays off until Start is clicked.
 - `Hey Slides, next slide`
 - `Hey Slides, previous slide`
 - `Hey Slides, next slides` / `Hey Slides, previous slides` (plural variants)
+- `Hey Slide, next slide` (singular prefix also accepted)
 - `Hey Slides, go to slide five`
 - `Hey Slides, go to slide one two` (slide 12)
 - Alternatively say `Hey Slides`, pause, then say `next slide` within four
@@ -31,6 +32,62 @@ processed locally. The microphone stays off until Start is clicked.
   transcript/action history; it is for debugging, not proof of ASR accuracy.
 - Stop disables actions immediately. Any remaining recognized text is preserved
   without executing it.
+
+## Command assist and checking captured audio (Phase 7b)
+
+Restart the application after updating. **Light English + Command assist** is
+the initial configuration. Command assist is experimental and enabled by default;
+uncheck it before Start to return to the original unrestricted-transcript parser.
+
+The same PCM audio feeds two decoders sharing the pretrained model:
+
+- Unrestricted ASR produces the actual `[MIC]` transcript. It remains unrestricted
+  and is not silently corrected to resemble a command.
+- Focused ASR uses a small phrase grammar for `Hey Slides` / `Hey Slide`, next,
+  previous, and numbered-slide commands. An accepted final candidate appears as
+  `[COMMAND ASR]` and goes through the existing strict command parser.
+
+When assist is enabled, only the focused channel can authorize voice actions;
+the unrestricted transcript cannot execute a second copy of the same command.
+Partial hypotheses never execute. `[unk]` hypotheses, missing/invalid word
+scores, a minimum word score below 0.55, or a mean below 0.80 reject the candidate
+and cancel pending wake authorization. These are experimental model-score
+heuristics, **not calibrated probabilities or proof of intent**. The prefix and
+valid grammar remain required. A restricted decoder may still force incorrect
+words or miss speech; real positive and negative recordings are essential.
+The unrestricted recognizer's completed-utterance boundary also closes/resets
+the focused segment so ordinary speech is not carried into the next command.
+Focused word timestamps restart with each segment; they are not directly
+comparable to wall-clock times or the unrestricted decoder's full-stream times.
+
+To diagnose the audio instead of guessing from bad text:
+
+1. Select the microphone carrying your voice and enable **Record input for diagnosis**.
+2. Click Start. Say a short ordinary sentence, then `Hey Slides, next slide` and
+   `Hey Slides, previous slide`, pausing after each phrase.
+3. Click Stop, then **Play captured input**.
+4. Check whether your voice is clear, loud enough, and played at a natural speed.
+   Silence, a distant voice, distortion, or unexpected speakers suggest checking
+   microphone selection, Windows gain, or Remote Desktop redirection before
+   judging the model. Clear audio can still expose an accent/model mismatch.
+
+Recording is **off by default**. Enabling the checkbox writes only the PCM samples
+actually processed by ASR into local `logs/input-<session>.wav`. No recording is
+uploaded automatically. Capture is 16 kHz mono PCM16. An interrupted/overloaded
+session can produce a partial file; its status is recorded in the session log.
+Playback is disabled until listening stops to avoid feeding it back into ASR.
+The operating system opens the captured WAV in its associated audio application.
+
+For a repeatable comparison on that exact recording (no slide actions are sent):
+
+```powershell
+& '.venv\Scripts\python.exe' -m scripts.compare_command_decoders 'logs\input-YOUR-SESSION.wav' --output 'logs\command-comparison.json'
+```
+
+The output preserves both transcripts, rejection reasons, word scores, and proposed
+commands. EOF finalization in a file comparison is not evidence of live latency.
+Command assist changes decoding constraints; it does **not** fine-tune the acoustic
+model or change the role of our separate manual MFCC analysis.
 
 ## PowerPoint Windows (Phase 6)
 
@@ -130,7 +187,7 @@ SNR, or confidence scores. Silence naturally appears quiet. Check the level
 **while speaking**: persistently quiet speech suggests checking the selected
 microphone, distance, and Windows input gain. Clipping suggests reducing gain.
 Audio-level summaries and the selected model profile are included in local logs;
-raw microphone audio is still not recorded.
+raw microphone audio is saved only if the diagnostic recording checkbox is enabled.
 
 When using Remote Desktop, ensure the selected input actually carries your
 forwarded microphone rather than the remote computer's room microphone. Compare
@@ -152,8 +209,9 @@ manual MFCC branch remains separate and unchanged.
 
 ```text
 Microphone (16 kHz mono PCM16, 25 ms blocks)
-  -> bounded audio queue -> local Vosk recognizer
-  -> partial/completed transcript -> strict completed-phrase parser
+  -> bounded audio queue -> unrestricted Vosk -> MIC transcript
+                         -> focused Vosk -> score/unknown gate (assist enabled)
+  -> strict completed-phrase parser from the selected recognition channel
   -> selected target: internal slide viewer OR PowerPoint COM adapter
   -> slide state read-back / explicit error
 
@@ -183,8 +241,8 @@ the current app implements full ASR from our own MFCC features.
 - Commands execute only on completed utterances. Endpoint detection may wait
   for silence. The maximum 200 ms target is **not validated** and this initial
   implementation may exceed it.
-- No keyword-restricted grammar is supplied to Vosk: ordinary English can be
-  transcribed, within the selected model's vocabulary and accuracy limitations.
+- The transcript decoder has no restricted grammar. Command assist adds a
+  separate restricted decoder; it does not turn free transcription into commands.
 - Strict parsing intentionally rejects embedded/negated/extra-word phrases.
   It cannot understand intent; an example command spoken exactly like a real
   command can still trigger. Recognition mistakes can miss or falsely produce
@@ -194,7 +252,7 @@ the current app implements full ASR from our own MFCC features.
 - The audio queue is bounded. Overflow or excessive backlog stops listening
   instead of dispatching commands from stale audio. Devices must support 16 kHz
   mono input; select another input if the driver rejects this format.
-- Canva integration, model comparison, and user
+- Canva integration, completed real-speaker evaluation, and the user
   study are not included yet. Previous project report sections need revision before
   submission because the model choice and scope have changed.
 
@@ -226,7 +284,8 @@ command latency. `adapter_ms` in action logs measures the COM call and slide-ind
 read-back, not visible rendering completion or word-to-action latency.
 
 Session logs contain recognized text, decisions, action sources, and processing
-measurements in local `logs/*.jsonl`. Raw microphone audio is not saved. Logs
+measurements in local `logs/*.jsonl`. Raw microphone audio is saved only through
+the opt-in diagnostic recording control. Logs
 and downloaded models are ignored by Git. Synthetic-audio smoke tests, if
 present in logs, are engineering checks and must not be reported as user-study
 results or real-speaker WER.
@@ -273,6 +332,24 @@ results or real-speaker WER.
 - Real recordings, comparison metrics, the user study, and latency evaluation
   remain outstanding. Phase 7 as a whole is not complete.
 
+### Phase 7b engineering checks, 17 October 2026
+
+- Unit checks cover score rejection, both prefix variants, strict parsing after
+  focused decoding, endpoint coordination, channel separation, exact PCM capture,
+  duplicate suppression, and existing behavior. Desktop integration checks passed.
+- Actual Light-model decoding of synthetic speech recognized next/previous and
+  the singular-prefix/plural-command variant. Tested ordinary, similar-sounding,
+  negated, quoted-example, and Marvin-without-a-configured-prefix samples did not
+  propose actions. These limited samples do not establish a false-action rate.
+- A continuous ordinary-speech/command replay passed through the real-time
+  callback/queue path with both decoders and MFCC active, without queue errors.
+  Endpoint coordination avoids carrying old
+  unknown speech into a later command. These are synthetic engineering checks,
+  not proof of performance with the student's voice or of the 200 ms constraint.
+- Captured real audio and the corresponding reference text are still required
+  to determine whether the recognition problem is audio delivery, model mismatch,
+  or both. Phase 7 remains incomplete.
+
 ## Phase commits
 
 The prototype baseline (Phases 2–5) is commit `8e272ec`. Phase 6 adds PowerPoint
@@ -283,12 +360,18 @@ downloaded models, recordings, and local logs. Phase 7 is evaluation; Phase 8 is
 final documentation and delivery. Allowing pretrained ASR is settled; lecturer
 acceptance of our separate manual-MFCC analysis branch is still pending.
 
+Phase 7b adds command-focused decoding alongside transcription and opt-in input
+capture. It is a recognition-improvement experiment, not a completed user study.
+
 ## Sources
 
 - Vosk model list and Apache-2.0 license for the selected model:
   https://alphacephei.com/vosk/models
 - Vosk Python streaming API example (consulted for interface behavior):
   https://github.com/alphacep/vosk-api/blob/master/python/example/test_microphone.py
+- Vosk restricted-vocabulary example and audio-quality debugging guidance:
+  https://github.com/alphacep/vosk-api/blob/master/python/example/test_words.py
+  https://alphacephei.com/vosk/accuracy
 - Kaldi feature extraction background:
   https://kaldi-asr.org/doc/feat.html
 - PowerPoint GotoSlide and current-slide read-back:

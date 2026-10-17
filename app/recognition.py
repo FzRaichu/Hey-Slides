@@ -18,10 +18,11 @@ def load_model(path):
 
 
 class StreamingRecognizer:
-    def __init__(self, model, sample_rate=16000):
+    def __init__(self, model, sample_rate=16000, grammar=None):
         from vosk import KaldiRecognizer
         # No restricted grammar: normal speech remains transcribable.
-        self.recognizer = KaldiRecognizer(model, sample_rate)
+        self.recognizer = (KaldiRecognizer(model, sample_rate) if grammar is None
+                           else KaldiRecognizer(model, sample_rate, json.dumps(grammar)))
         self.recognizer.SetWords(True)
         self._last_partial = ""
 

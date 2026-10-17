@@ -2,6 +2,8 @@
 
 from datetime import datetime
 import json
+import os
+from pathlib import Path
 import queue
 import tkinter as tk
 from tkinter import ttk
@@ -30,8 +32,8 @@ class Prototype:
     def __init__(self, root, powerpoint=None):
         self.root = root
         root.title("Hey Slides | University Speech Recognition Prototype")
-        root.geometry("1180x850")
-        root.minsize(980, 760)
+        root.geometry("1180x930")
+        root.minsize(980, 850)
         root.configure(bg=BG)
         self.parser = CommandParser()
         self.deck = SlideDeck(count=len(SLIDES))
@@ -52,7 +54,11 @@ class Prototype:
         self.device = tk.StringVar(value="Default microphone")
         self.model_profile = tk.StringVar(value=config.MODEL_PROFILES[config.DEFAULT_MODEL_PROFILE]["label"])
         self.audio_quality = tk.StringVar(value="Input level: -- | microphone is off")
+        self.command_assist = tk.BooleanVar(value=True)
+        self.record_audio = tk.BooleanVar(value=False)
+        self.last_recording = None
         self._log_file = None
+        self._closing = False
         self._build()
         self.show_slide()
         self.refresh_devices()
@@ -104,21 +110,33 @@ class Prototype:
         self.model_box.pack(side="left")
         tk.Label(model_controls, textvariable=self.audio_quality, bg=BG, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="left", padx=12)
+        diagnostics = tk.Frame(outer, bg=BG)
+        diagnostics.pack(fill="x", pady=(0, 10))
+        self.assist_check = tk.Checkbutton(diagnostics, text="Command assist (experimental)",
+                                           variable=self.command_assist, bg=BG, fg=INK, font=("Segoe UI", 10))
+        self.assist_check.pack(side="left")
+        self.record_check = tk.Checkbutton(diagnostics, text="Record input for diagnosis (local WAV)",
+                                           variable=self.record_audio, bg=BG, fg=INK, font=("Segoe UI", 10))
+        self.record_check.pack(side="left", padx=10)
+        self.play_button = ttk.Button(diagnostics, text="Play captured input", command=self.play_recording, state="disabled")
+        self.play_button.pack(side="left")
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=6, uniform="body")
         body.columnconfigure(1, weight=5, uniform="body")
         body.rowconfigure(0, weight=1)
+        body.configure(height=300)
+        body.grid_propagate(False)
         left = tk.Frame(body, bg=INK, padx=24, pady=22)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         self.preview_caption = tk.Label(left, text="PRESENTATION PREVIEW", bg=INK, fg="#6dd8ca", font=("Segoe UI", 9, "bold"))
         self.preview_caption.pack(anchor="w")
         self.slide_kicker = tk.Label(left, bg=INK, fg="#a7bbcf", font=("Segoe UI", 11), anchor="w")
-        self.slide_kicker.pack(fill="x", pady=(30, 14))
-        self.slide_title = tk.Label(left, bg=INK, fg="white", font=("Segoe UI", 29, "bold"), anchor="w", justify="left")
+        self.slide_kicker.pack(fill="x", pady=(14, 10))
+        self.slide_title = tk.Label(left, bg=INK, fg="white", font=("Segoe UI", 25, "bold"), anchor="w", justify="left")
         self.slide_title.pack(fill="x")
-        self.slide_body = tk.Label(left, bg=INK, fg="#d4e1ec", font=("Segoe UI", 13), justify="left", anchor="nw")
-        self.slide_body.pack(fill="both", expand=True, pady=(18, 20))
+        self.slide_body = tk.Label(left, bg=INK, fg="#d4e1ec", font=("Segoe UI", 12), justify="left", anchor="nw")
+        self.slide_body.pack(fill="both", expand=True, pady=(12, 12))
         left.bind("<Configure>", lambda e: (self.slide_title.configure(wraplength=max(280, e.width - 48)),
                                            self.slide_body.configure(wraplength=max(280, e.width - 48))))
         nav = tk.Frame(left, bg=INK)
@@ -133,7 +151,7 @@ class Prototype:
                  justify="left", anchor="w", wraplength=390).pack(fill="x", pady=(8, 10))
         transcript_frame = tk.Frame(right, bg=CARD)
         transcript_frame.pack(fill="both", expand=True)
-        self.transcript = tk.Text(transcript_frame, height=9, width=35, wrap="word", state="disabled",
+        self.transcript = tk.Text(transcript_frame, height=5, width=35, wrap="word", state="disabled",
                                   bg="#f6f8fa", fg=INK, relief="flat", font=("Segoe UI", 11), padx=10, pady=10)
         scrollbar = ttk.Scrollbar(transcript_frame, command=self.transcript.yview)
         self.transcript.configure(yscrollcommand=scrollbar.set)
@@ -191,13 +209,16 @@ class Prototype:
             self.status.set(f"Microphone unavailable: {exc}. Text-only checks still work.")
 
     def start(self):
+        if self._closing:
+            return
         try:
             if self.target.get() == "PowerPoint":
                 self.powerpoint_state = self.powerpoint.snapshot()
                 self.show_slide()
             self.parser.reset()
             profile = next(key for key, item in config.MODEL_PROFILES.items() if item["label"] == self.model_profile.get())
-            self.session.start(self.devices.get(self.device.get()), model_profile=profile)
+            self.session.start(self.devices.get(self.device.get()), model_profile=profile,
+                               command_assist=self.command_assist.get(), record_audio=self.record_audio.get())
             self.active_session = self.session.session_id
             self.listening = True
             self.start_button.configure(state="disabled")
@@ -205,9 +226,16 @@ class Prototype:
             self.device_box.configure(state="disabled")
             self.refresh_button.configure(state="disabled")
             self.model_box.configure(state="disabled")
+            self.assist_check.configure(state="disabled")
+            self.record_check.configure(state="disabled")
+            self.play_button.configure(state="disabled")
+            if self.record_audio.get():
+                self.last_recording = None
             self.status.set("Starting microphone...")
             self.command_status.set("Command prefix: Hey Slides")
-            self.log("start", device=self.device.get(), model_profile=profile, session_id=self.active_session)
+            self.log("start", device=self.device.get(), model_profile=profile,
+                     command_assist=self.command_assist.get(), record_audio=self.record_audio.get(),
+                     session_id=self.active_session)
         except Exception as exc:
             if isinstance(exc, PowerPointError):
                 self.powerpoint_state = None
@@ -271,10 +299,26 @@ class Prototype:
                     self.partial.set("Listening..." if self.listening else "Microphone off")
                     if event["text"]:
                         self.handle_final(event["text"], event["utterance_id"], "microphone",
-                                          allow_action=self.listening and event["allow_action"])
+                                          allow_action=self.listening and event["allow_action"],
+                                          transcript_only=self.listening and event.get("transcript_only", False))
                         self.log("recognition", text=event["text"], words=event["words"],
                                  decode_ms=event["decode_ms"], session_id=self.active_session)
                     self._update_timing(event)
+                elif kind == "command_final":
+                    if not self.listening or not event.get("allow_action"):
+                        continue
+                    self.log("command_recognition", text=event["text"], words=event["words"],
+                             eligible=event["eligible"], reason=event["reason"],
+                             mean_score=event.get("mean_score"), decode_ms=event["decode_ms"])
+                    if event["eligible"]:
+                        self.handle_final(event["text"], event["utterance_id"], "command recognizer")
+                    else:
+                        self.parser.disarm()
+                        self.command_status.set(f"Command candidate rejected: {event['reason']}")
+                elif kind == "recording_saved":
+                    if event["seconds"] > 0:
+                        self.last_recording = Path(event["path"])
+                    self.log("recording_saved", path=event["path"], seconds=event["seconds"], interrupted=event["interrupted"])
                 elif kind == "features":
                     self.last_vector = event["vector"]
                     self.draw_features(event["mfcc"])
@@ -302,10 +346,13 @@ class Prototype:
                     self.device_box.configure(state="readonly")
                     self.refresh_button.configure(state="normal")
                     self.model_box.configure(state="readonly")
+                    self.assist_check.configure(state="normal")
+                    self.record_check.configure(state="normal")
+                    self.play_button.configure(state="normal" if self.last_recording else "disabled")
                     self.partial.set("Microphone off")
                     self.audio_quality.set("Input level: -- | microphone is off")
                     if not self.status.get().startswith("Error:"):
-                        self.status.set("Ready | microphone is off")
+                        self.status.set("Ready | microphone is off" + (" | input WAV saved; use Play captured input" if self.last_recording else ""))
         except queue.Empty:
             pass
         self.root.after(50, self.poll)
@@ -317,15 +364,18 @@ class Prototype:
         fmt = lambda x: "--" if x is None else f"{x:.1f} ms"
         self.timing.set(f"Decode call: {fmt(decode)} | MFCC analysis: {fmt(mfcc)} | audio queue: {fmt(age)}")
 
-    def handle_final(self, text, utterance_id, source, allow_action=True):
+    def handle_final(self, text, utterance_id, source, allow_action=True, transcript_only=False):
         self.transcript.configure(state="normal")
-        label = "MIC" if source == "microphone" else "TEXT TEST / not ASR"
+        label = ("MIC" if source == "microphone" else "COMMAND ASR" if source == "command recognizer"
+                 else "TEXT TEST / not ASR")
         self.transcript.insert("end", f"[{label}] {text}\n\n")
         # Keep the visible transcript bounded; the full local log remains available.
         if int(self.transcript.index("end-1c").split(".")[0]) > 500:
             self.transcript.delete("1.0", "101.0")
         self.transcript.see("end")
         self.transcript.configure(state="disabled")
+        if transcript_only:
+            return
         if not allow_action:
             self.command_status.set("Transcript saved on Stop; actions disabled")
             return
@@ -430,10 +480,35 @@ class Prototype:
         except OSError as exc:
             self.status.set(f"Could not save features: {exc}")
 
+    def play_recording(self):
+        if self.listening or self.session.running:
+            self.status.set("Stop listening before playing captured audio to avoid feedback.")
+            return
+        if self.last_recording is None or not self.last_recording.is_file():
+            self.status.set("No captured input yet. Enable Record input, Start, speak, then Stop.")
+            return
+        try:
+            os.startfile(str(self.last_recording))
+        except (OSError, AttributeError) as exc:
+            self.status.set(f"Open this recording manually: {self.last_recording} ({exc})")
+
     def close(self):
+        if self._closing:
+            return
+        self._closing = True
         self.listening = False
+        self.parser.reset()
         self.session.stop()
         self.powerpoint.disconnect()
+        self.start_button.configure(state="disabled")
+        self.stop_button.configure(state="disabled")
+        self.status.set("Closing | waiting for audio and any recording to finish...")
+        self._finish_close()
+
+    def _finish_close(self):
+        if self.session.running:
+            self.root.after(50, self._finish_close)
+            return
         if self._log_file is not None:
             self._log_file.close()
         self.root.destroy()

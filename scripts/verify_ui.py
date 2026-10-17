@@ -30,6 +30,20 @@ def main():
         assert ui.deck.index == 1, "Replayed event must not execute twice"
         ui.handle_final("hey slides previous slide", "c", "text test")
         assert ui.deck.index == 0
+        ui.handle_final("hey slides next slide", "transcript-only", "microphone", allow_action=False, transcript_only=True)
+        assert ui.deck.index == 0
+        ui.session.events.put({"session_id": "test", "kind": "command_final", "text": "hey slide next slide",
+                               "utterance_id": "focused", "allow_action": True, "eligible": True,
+                               "reason": "candidate", "mean_score": 0.95, "words": [], "decode_ms": 1})
+        ui.poll()
+        assert ui.deck.index == 1
+        ui.session.events.put({"session_id": "test", "kind": "command_final", "text": "hey slides next slide",
+                               "utterance_id": "rejected-focused", "allow_action": True, "eligible": False,
+                               "reason": "low model score", "mean_score": 0.4, "words": [], "decode_ms": 1})
+        ui.poll()
+        assert ui.deck.index == 1
+        ui.deck.index = 0
+        ui.show_slide()
         ui.handle_final("hey slides go to slide five", "goto", "text test")
         assert ui.deck.index == 4
         ui.handle_final("hey slides go to slide 99", "invalid-goto", "text test")
@@ -43,6 +57,11 @@ def main():
                                "allow_action": True, "words": [], "decode_ms": 1})
         ui.poll()
         assert ui.deck.index == 0, "Queued final after Stop must not execute"
+        ui.session.events.put({"session_id": "test", "kind": "command_final", "text": "hey slides next slide",
+                               "utterance_id": "focused-after-stop", "allow_action": True, "eligible": True,
+                               "reason": "candidate", "mean_score": 0.95, "words": [], "decode_ms": 1})
+        ui.poll()
+        assert ui.deck.index == 0, "Queued focused command after Stop must not execute"
         # Events from an old session must never authorize the current session.
         ui.session.events.put({"session_id": "old", "kind": "final",
                                "text": "hey slides next slide", "utterance_id": "e",

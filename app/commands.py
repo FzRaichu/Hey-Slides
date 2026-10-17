@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import re
 import time
 
-from app.config import COMMAND_PREFIX
+from app.config import COMMAND_PREFIXES
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,11 @@ class CommandParser:
         self._seen = deque(maxlen=256)
 
     def reset(self):
-        self.armed_until = 0.0
+        self.disarm()
         self._seen.clear()
+
+    def disarm(self):
+        self.armed_until = 0.0
 
     def accept(self, text: str, utterance_id: str, now: float | None = None) -> Decision:
         now = time.monotonic() if now is None else now
@@ -61,12 +64,12 @@ class CommandParser:
         text = " ".join(re.findall(r"[a-z0-9]+", text.lower()))
         if not text:
             return Decision("empty")
-        if text == COMMAND_PREFIX:
+        if text in COMMAND_PREFIXES:
             self.armed_until = now + self.wake_timeout
             return Decision("armed")
-        prefixed = text.startswith(COMMAND_PREFIX + " ")
-        if prefixed:
-            command = text[len(COMMAND_PREFIX):].strip()
+        prefix = next((item for item in COMMAND_PREFIXES if text.startswith(item + " ")), None)
+        if prefix:
+            command = text[len(prefix):].strip()
         elif now < self.armed_until:
             command = text
         else:
