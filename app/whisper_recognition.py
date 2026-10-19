@@ -17,7 +17,9 @@ VAD_SETTINGS = {"threshold": 0.5, "min_speech_duration_ms": 200,
 def load_whisper_model(path, threads=4):
     path = Path(path)
     if not (path / "model.bin").is_file():
-        raise FileNotFoundError("Local Whisper model missing; run python -m scripts.download_whisper_evaluation --model small.en")
+        variant = path.name.removeprefix("faster-whisper-")
+        variant = variant if variant in ("base.en", "small.en", "small") else "small"
+        raise FileNotFoundError(f"Local Whisper model missing; run python -m scripts.download_whisper_evaluation --model {variant}")
     if threads < 1:
         raise ValueError("threads must be positive")
     from faster_whisper import WhisperModel
@@ -50,12 +52,14 @@ def context_spans(spans, max_samples=8 * SAMPLE_RATE):
     return groups
 
 
-def transcribe_audio(model, audio, segmentation="whole"):
+def transcribe_audio(model, audio, segmentation="whole", language="en"):
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim != 1 or not np.isfinite(audio).all():
         raise ValueError("Expected finite mono float audio at 16 kHz")
     if segmentation not in ("whole", "vad", "context"):
         raise ValueError("Unknown segmentation mode")
+    if language not in ("en", "id", None):
+        raise ValueError("Expected en, id, or None for automatic language detection")
     began = time.perf_counter()
     if not audio.size:
         return {"segments": [], "spans": [], "elapsed_seconds": 0.0}
@@ -72,7 +76,7 @@ def transcribe_audio(model, audio, segmentation="whole"):
         started = time.perf_counter()
         # Each VAD span is decoded independently, rather than concatenated back
         # into a 30-second window. Whole mode preserves the previous benchmark.
-        segments, _ = model.transcribe(audio[start:end], language="en", beam_size=5,
+        segments, info = model.transcribe(audio[start:end], language=language, task="transcribe", beam_size=5,
                                        vad_filter=segmentation == "whole",
                                        condition_on_previous_text=False,
                                        initial_prompt=None, hotwords=None)
@@ -83,6 +87,8 @@ def transcribe_audio(model, audio, segmentation="whole"):
         elapsed = time.perf_counter() - started
         output.extend(decoded)
         diagnostics.append({"start": start / SAMPLE_RATE, "end": end / SAMPLE_RATE,
+                            "detected_language": getattr(info, "language", None),
+                            "language_probability": getattr(info, "language_probability", None),
                             "decode_seconds": elapsed, "output_segments": len(decoded),
                             "text": " ".join(s["text"] for s in decoded)})
     return {"segments": output, "spans": diagnostics,

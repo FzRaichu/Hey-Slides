@@ -17,7 +17,7 @@ def sha256_file(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=("base.en", "small.en"), default="base.en")
+    parser.add_argument("--model", choices=("base.en", "small.en", "small"), default="base.en")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     repo = f"Systran/faster-whisper-{args.model}"

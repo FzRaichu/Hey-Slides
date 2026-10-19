@@ -13,6 +13,18 @@ def segment(text, start=0.1, end=0.9):
 
 
 class WhisperRecognitionTests(unittest.TestCase):
+    def test_multilingual_requests_auto_detection_and_transcription(self):
+        model = MagicMock()
+        model.transcribe.return_value = (iter([segment("Ini adalah project kami")]),
+                                         SimpleNamespace(language="id", language_probability=0.91))
+        result = transcribe_audio(model, np.zeros(16000), language=None)
+        self.assertIsNone(model.transcribe.call_args.kwargs["language"])
+        self.assertEqual(model.transcribe.call_args.kwargs["task"], "transcribe")
+        self.assertEqual(result["spans"][0]["detected_language"], "id")
+        self.assertEqual(result["segments"][0]["text"], "Ini adalah project kami")
+        with self.assertRaises(ValueError):
+            transcribe_audio(model, np.zeros(16000), language="invalid")
+
     def test_context_groups_keep_gaps_without_overlap_or_mutating_vad_spans(self):
         original = [{"start": 100, "end": 200}, {"start": 300, "end": 400},
                     {"start": 500, "end": 900}]

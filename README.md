@@ -3,6 +3,9 @@
 Working direction: English speech-to-text with a pretrained local Vosk model,
 **Direct commands** by default, an optional **Hey Slides** prefix, an internal five-slide viewer,
 and a Windows PowerPoint slideshow adapter.
+The student confirmed English–Indonesian presentations on 19 October. The live
+desktop recognizer is still English-only; multilingual Whisper is currently an
+offline evaluation/review candidate, not a live microphone option.
 Pretrained models were accepted by the lecturer according to the student on
 17 October 2026. The exact acceptance of the separate manual-feature branch
 still needs to be established.
@@ -455,6 +458,42 @@ The script is not ground truth until the actual spoken wording is confirmed.
 Only English recognition has been compared here; Indonesian or mixed-language
 presentations require a multilingual candidate. These offline timings do not
 validate live CPU coexistence or the 200 ms target. Sixty regression tests pass.
+
+### Phase 7f multilingual preparation, 19 October 2026
+
+The [multilingual preparation report](report/Phase_7f_Multilingual_Preparation.md)
+records the change in target and its evidence limits.
+After the student confirmed English–Indonesian presentation speech, the target
+candidate changed from `small.en` to multilingual **small**. English-only models
+are not the appropriate target for Indonesian passages. Automatic language
+detection and `task=transcribe` are supported by the evaluation helpers; the
+task requests transcription rather than translation, but code-switching can
+still fail or be rendered in the dominant language. A real mixed-language
+recording with a verified transcript is required before judging accuracy.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.download_whisper_evaluation --model small
+.\.venv\Scripts\python.exe -m scripts.transcribe_whisper_wav logs/input-YOUR-SESSION.wav --model small --language auto --output logs/mixed-review.json
+```
+
+The review tool prints the transcript and saves JSON locally. It opens no
+microphone and sends no slide actions. It defaults to multilingual small;
+English-only candidates require explicit `--language en`. To compare models on
+new direct-command recordings, the benchmark also accepts `--language auto`
+and `--command-mode direct` with `--whisper-model models/faster-whisper-small`.
+
+Follow the [mixed-language reading script](report/Mixed_Language_Test_Script.md)
+for the next capture. Desktop `[MIC]` remains Vosk English, even when the
+multilingual model is downloaded. The capture WAV is reviewed separately.
+Navigation commands remain English. This phase does not integrate a new live
+backend or claim mixed-language accuracy or 200 ms compliance.
+
+Both multilingual whole/auto and grouped-context/auto completed all six older
+clips. Each had three substitutions on the only confirmed 12-word clip (25% WER).
+Total offline decoding was 49.75s and 57.62s respectively for 192.35s of audio.
+Grouped context reduced the long-clip repetition seen in whole mode, but errors
+remain. These English-command recordings do not validate bilingual recognition.
+The review CLI ran successfully on a real saved WAV; 61 regression tests pass.
 
 ## Phase commits
 

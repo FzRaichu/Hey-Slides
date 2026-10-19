@@ -39,11 +39,14 @@ def main():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--segmentation", choices=("whole", "vad", "context"), default="whole")
     parser.add_argument("--command-mode", choices=config.COMMAND_MODES, default="wake")
+    parser.add_argument("--language", choices=("en", "id", "auto"), default="en")
     args = parser.parse_args()
     if args.threads < 1:
         parser.error("--threads must be positive")
     if not (args.whisper_model / "model.bin").is_file():
         parser.error("Download the evaluation model first: python -m scripts.download_whisper_evaluation")
+    if args.whisper_model.name.endswith(".en") and args.language != "en":
+        parser.error("Use a multilingual model for Indonesian or automatic language detection")
     print("Loading optional Whisper runtime", flush=True)
 
     references = json.loads(args.references.read_text(encoding="utf-8")) if args.references else {}
@@ -63,7 +66,8 @@ def main():
                         "versions": {p: version(p) for p in ("faster-whisper", "ctranslate2", "vosk", "numpy",
                                                                "av", "onnxruntime", "tokenizers", "huggingface-hub")}},
         "whisper": {"model": str(args.whisper_model.resolve()), "device": "cpu", "compute_type": "int8",
-                    "threads": args.threads, "beam_size": 5, "language": "en", "segmentation": args.segmentation,
+                    "threads": args.threads, "beam_size": 5, "language": args.language,
+                    "task": "transcribe", "segmentation": args.segmentation,
                     "vad_filter": True, "external_vad_settings": VAD_SETTINGS if args.segmentation != "whole" else None,
                     "condition_on_previous_text": False, "initial_prompt": None, "hotwords": None,
                     "provenance": json.loads(provenance_path.read_text(encoding="utf-8")) if provenance_path.exists() else None},
@@ -85,7 +89,8 @@ def main():
         baseline = compare(path, model=vosk, command_mode=args.command_mode)
         vosk_seconds = time.perf_counter() - started
         started = time.perf_counter()
-        transcription = transcribe_audio(whisper, pcm, segmentation=args.segmentation)
+        transcription = transcribe_audio(whisper, pcm, segmentation=args.segmentation,
+                                        language=None if args.language == "auto" else args.language)
         segments = transcription["segments"]
         whisper_seconds = time.perf_counter() - started
         hypotheses = {
