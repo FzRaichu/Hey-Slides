@@ -1,7 +1,7 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from app.command_recognition import assess_candidate, command_grammar, align_command_endpoint
+from app.command_recognition import assess_candidate, command_grammar, align_command_endpoint, CommandRecognizer
 from app.commands import CommandParser
 
 
@@ -10,6 +10,21 @@ def candidate(text, score=0.95):
 
 
 class FocusedRecognitionTests(unittest.TestCase):
+    def test_direct_grammar_has_commands_and_unknown_without_wake_phrases(self):
+        grammar = command_grammar(require_prefix=False)
+        for phrase in ("[unk]", "next slide", "next slides", "previous slides", "go to slides seven"):
+            self.assertIn(phrase, grammar)
+        self.assertFalse(any("hey" in phrase for phrase in grammar))
+
+    def test_direct_decoder_reset_retains_grammar_and_score_checks(self):
+        with patch("app.command_recognition.StreamingRecognizer") as decoder:
+            focused = CommandRecognizer(object(), require_prefix=False)
+            focused.reset()
+            for call in decoder.call_args_list:
+                self.assertEqual(call.kwargs["grammar"], command_grammar(False))
+            decoder.return_value.feed.return_value = {"kind": "final", **candidate("next slide", 0.4)}
+            self.assertFalse(focused.feed(b"pcm")["eligible"])
+
     def test_shared_endpoint_flushes_partial_and_clears_old_unknown_context(self):
         decoder = MagicMock()
         flushed = {"kind": "final", "text": "hey slides next slide"}

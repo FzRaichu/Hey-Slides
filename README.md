@@ -1,7 +1,7 @@
 # Hey Slides — local speech recognition prototype
 
 Working direction: English speech-to-text with a pretrained local Vosk model,
-an explicit **Hey Slides** command prefix, an internal five-slide viewer,
+**Direct commands** by default, an optional **Hey Slides** prefix, an internal five-slide viewer,
 and a Windows PowerPoint slideshow adapter.
 Pretrained models were accepted by the lecturer according to the student on
 17 October 2026. The exact acceptance of the separate manual-feature branch
@@ -19,15 +19,17 @@ cd 'C:\Binus Semester 5\Speech Recognition\voice-slide'
 Choose a microphone, click **Start listening**, and speak English. Audio is
 processed locally. The microphone stays off until Start is clicked.
 
-- `Hey Slides, next slide`
-- `Hey Slides, previous slide`
-- `Hey Slides, next slides` / `Hey Slides, previous slides` (plural variants)
-- `Hey Slide, next slide` (singular prefix also accepted)
-- `Hey Slides, go to slide five`
-- `Hey Slides, go to slide one two` (slide 12)
-- Alternatively say `Hey Slides`, pause, then say `next slide` within four
-  seconds **after the prefix is finalized**.
-- Every new command needs the prefix. Other complete phrases are only transcribed.
+- Select **Direct commands (no wake phrase)**. This is the new application default.
+- Say `Next slide` / `Next slides`, or `Previous slide` / `Previous slides`.
+- Say `Go to slide five`, `Go to slides seven`, or `Go to slide one two` (slide 12).
+- No held key or wake phrase is required while listening in Direct mode.
+- Pause after each command so it can finalize. Additional words in the same
+  utterance are not accepted as a command; normal speech still appears as text.
+- Stop before changing the **Command mode** selector. **Require Hey Slides**
+  retains the earlier prefix-based behavior: `Hey Slides, next slide` or
+  `Hey Slide, previous slide`. A separately spoken prefix authorizes the next
+  utterance within four seconds after prefix finalization.
+- Direct mode accepts bare commands only; switch to wake mode to use a prefix.
 - The text-only parser check bypasses recognition and is clearly labeled in the
   transcript/action history; it is for debugging, not proof of ASR accuracy.
 - Stop disables actions immediately. Any remaining recognized text is preserved
@@ -43,8 +45,9 @@ The same PCM audio feeds two decoders sharing the pretrained model:
 
 - Unrestricted ASR produces the actual `[MIC]` transcript. It remains unrestricted
   and is not silently corrected to resemble a command.
-- Focused ASR uses a small phrase grammar for `Hey Slides` / `Hey Slide`, next,
-  previous, and numbered-slide commands. An accepted final candidate appears as
+- Focused ASR uses a phrase grammar for next, previous, and numbered-slide
+  commands; wake phrases are included only in **Require Hey Slides** mode.
+  An accepted final candidate appears as
   `[COMMAND ASR]` and goes through the existing strict command parser.
 
 When assist is enabled, only the focused channel can authorize voice actions;
@@ -52,8 +55,9 @@ the unrestricted transcript cannot execute a second copy of the same command.
 Partial hypotheses never execute. `[unk]` hypotheses, missing/invalid word
 scores, a minimum word score below 0.55, or a mean below 0.80 reject the candidate
 and cancel pending wake authorization. These are experimental model-score
-heuristics, **not calibrated probabilities or proof of intent**. The prefix and
-valid grammar remain required. A restricted decoder may still force incorrect
+heuristics, **not calibrated probabilities or proof of intent**. Valid complete
+command grammar remains required; the prefix is required only in wake mode.
+A restricted decoder may still force incorrect
 words or miss speech; real positive and negative recordings are essential.
 The unrestricted recognizer's completed-utterance boundary also closes/resets
 the focused segment so ordinary speech is not carried into the next command.
@@ -63,8 +67,8 @@ comparable to wall-clock times or the unrestricted decoder's full-stream times.
 To diagnose the audio instead of guessing from bad text:
 
 1. Select the microphone carrying your voice and enable **Record input for diagnosis**.
-2. Click Start. Say a short ordinary sentence, then `Hey Slides, next slide` and
-   `Hey Slides, previous slide`, pausing after each phrase.
+2. Select Direct commands and click Start. Say a short ordinary sentence, then
+   `Next slides` and `Previous slides`, pausing after each phrase.
 3. Click Stop, then **Play captured input**.
 4. Check whether your voice is clear, loud enough, and played at a natural speed.
    Silence, a distant voice, distortion, or unexpected speakers suggest checking
@@ -81,7 +85,7 @@ The operating system opens the captured WAV in its associated audio application.
 For a repeatable comparison on that exact recording (no slide actions are sent):
 
 ```powershell
-& '.venv\Scripts\python.exe' -m scripts.compare_command_decoders 'logs\input-YOUR-SESSION.wav' --output 'logs\command-comparison.json'
+& '.venv\Scripts\python.exe' -m scripts.compare_command_decoders 'logs\input-YOUR-SESSION.wav' --command-mode direct --output 'logs\command-comparison.json'
 ```
 
 The output preserves both transcripts, rejection reasons, word scores, and proposed
@@ -174,9 +178,10 @@ back to another recognizer. To install either profile explicitly:
 & '.venv\Scripts\python.exe' -m scripts.download_model --profile light
 ```
 
-For the first real test, say **Hey Slides, next slide** as one phrase, then pause.
-Repeat with **previous slide**. Singular and plural slide commands are accepted,
-but the prefix is still required. Wrong words such as `next line` or `a slight`
+For a Direct-mode test, say **Next slides** as one phrase, then pause.
+Repeat with **Previous slides** and **Go to slide seven** (use a deck with at
+least seven slides). In Require Hey Slides mode, prepend the wake phrase.
+Wrong words such as `next line` or `a slight`
 are not automatically rewritten into commands; guessing those could cause false
 actions. A correctly transcribed command can still be rejected if additional
 words are included in the same utterance, because the grammar remains strict.
@@ -385,6 +390,35 @@ or partial references remain unscored. Raw hypotheses, references, audio hashes,
 and timing results stay in ignored `logs/`. Do not commit private recordings or
 transcripts. Offline proposed actions include EOF finalization and are not actual
 slide actions. Offline RTF is throughput, not proof of the 200 ms requirement.
+
+### Phase 7d direct command experiment, 19 October 2026
+
+- The desktop default is now **Direct commands (no wake phrase)**. The selector
+  retains **Require Hey Slides** for comparison and is locked during listening.
+- Parser and focused decoder use the same mode. Score gates, unknown rejection,
+  full-transcript separation, event deduplication, Stop protection, and
+  PowerPoint deck validation remain active. Model weights have not changed.
+- Automated checks: 55 unit/regression tests and desktop integration passed.
+  Actual Vosk decoding of Windows synthetic speech proposed next, previous,
+  and goto 7 for bare commands. Ordinary, embedded-command, and negated-command
+  samples proposed no actions. This is a limited engineering check, not a user
+  accuracy or false-action-rate result. The student must test fresh bare-command
+  recordings; old recordings containing a wake phrase are not matched test data.
+- Say a normal presentation sentence between commands and check action history
+  for unwanted navigation. Direct mode removes explicit wake authorization, so
+  recognition errors can still result in an unintended valid-looking command.
+- File comparison tools keep wake mode as their backward-compatible default;
+  pass `--command-mode direct` to `scripts.compare_command_decoders` for this mode.
+  The existing Phase 7c benchmark/report remains a historical wake-mode evaluation.
+
+The current deliverable is a Windows desktop application. A browser interface
+deployed on Vercel is a later deliverable, not implemented or deployed in this
+phase. Recognition, MFCC, and command modules are separate from Tkinter and can
+be reused behind a browser interface or another audio adapter. A future web
+deployment must choose where ASR runs and use browser-based slides or a local
+companion for Windows PowerPoint. Hosted code cannot use this laptop's COM
+adapter directly. Keep both interfaces against shared command semantics rather
+than duplicating recognition logic. No hosting architecture is committed yet.
 
 ## Phase commits
 

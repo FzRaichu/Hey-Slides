@@ -4,6 +4,30 @@ from app.commands import CommandParser, SlideDeck
 
 
 class CommandTests(unittest.TestCase):
+    def test_direct_commands_accept_exact_singular_plural_and_numbers(self):
+        parser = CommandParser(require_prefix=False)
+        for index, (text, action, target) in enumerate([
+            ("Next slide!", "next", None), ("Next Slides", "next", None),
+            ("Previous slides", "previous", None), ("previous slide", "previous", None),
+            ("Go to slide seven", "goto", 7), ("go to slides 12", "goto", 12)]):
+            decision = parser.accept(text, str(index), index + 1)
+            self.assertEqual((decision.action, decision.target_slide), (action, target))
+
+    def test_direct_mode_rejects_embedded_negated_prefixed_and_incomplete_phrases(self):
+        parser = CommandParser(require_prefix=False)
+        for index, text in enumerate(["on the next slide", "next slide shows results",
+                                      "do not go to slide seven", "go to slide", "next",
+                                      "hey slides next slide", "hey slides", "next slide next slide",
+                                      "go to slides zero", "next slideshow", "next slide 2"]):
+            self.assertIsNone(parser.accept(text, str(index), index + 1).action, text)
+        self.assertEqual(parser.armed_until, 0)
+
+    def test_direct_mode_deduplicates_events_but_allows_intentional_repetition(self):
+        parser = CommandParser(require_prefix=False)
+        self.assertEqual(parser.accept("next slide", "a", 1).action, "next")
+        self.assertIsNone(parser.accept("next slide", "a", 2).action)
+        self.assertEqual(parser.accept("next slide", "b", 3).action, "next")
+
     def setUp(self):
         self.parser = CommandParser()
 

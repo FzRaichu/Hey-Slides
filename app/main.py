@@ -18,9 +18,9 @@ from app.session import MicrophoneSession
 
 
 SLIDES = [
-    ("A voice for your slides.", "Voice Slide Control", "Speak naturally. Use Hey Slides when you want to navigate."),
+    ("A voice for your slides.", "Voice Slide Control", "Choose Direct commands to say Next slide without a wake phrase, or select Require Hey Slides."),
     ("From speech to text.", "01 / Local recognition", "The English ASR model runs on your computer. Ordinary speech stays in the transcript."),
-    ("A phrase with a purpose.", "02 / Intentional commands", "Say Hey Slides, next slide or Hey Slides, previous slide. Completed phrases trigger one action."),
+    ("A phrase with a purpose.", "02 / Intentional commands", "Direct mode: Next slide, Previous slide, or Go to slide five. Completed command phrases trigger one action."),
     ("See the signal.", "03 / Manual MFCC analysis", "Our NumPy pipeline extracts MFCC features separately. Vosk uses its own internal feature pipeline."),
     ("Measure, then improve.", "04 / Evaluation ahead", "Recognition accuracy, false activations, user testing, and the 200 ms target still need evaluation."),
 ]
@@ -32,10 +32,10 @@ class Prototype:
     def __init__(self, root, powerpoint=None):
         self.root = root
         root.title("Hey Slides | University Speech Recognition Prototype")
-        root.geometry("1180x930")
-        root.minsize(980, 850)
+        root.geometry("1180x970")
+        root.minsize(980, 900)
         root.configure(bg=BG)
-        self.parser = CommandParser()
+        self.parser = CommandParser(require_prefix=config.DEFAULT_COMMAND_MODE == "wake")
         self.deck = SlideDeck(count=len(SLIDES))
         self.powerpoint = powerpoint or PowerPointAdapter()
         self.powerpoint_state = None
@@ -46,7 +46,8 @@ class Prototype:
         self.last_vector = None
         self.status = tk.StringVar(value="Ready | microphone is off")
         self.partial = tk.StringVar(value="Partial recognition will appear here...")
-        self.command_status = tk.StringVar(value="Command prefix: Hey Slides")
+        self.command_status = tk.StringVar(value="Direct commands | say Next slide, Previous slide, or Go to slide five")
+        self.command_mode = tk.StringVar(value=config.COMMAND_MODES[config.DEFAULT_COMMAND_MODE])
         self.timing = tk.StringVar(value="Decode: -- | MFCC: -- | queue: --")
         self.feature_status = tk.StringVar(value="Manual MFCC analysis | waiting for audio")
         self.slide_number = tk.StringVar()
@@ -111,6 +112,15 @@ class Prototype:
         tk.Label(model_controls, textvariable=self.audio_quality, bg=BG, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="left", padx=12)
         diagnostics = tk.Frame(outer, bg=BG)
+        mode_controls = tk.Frame(outer, bg=BG)
+        mode_controls.pack(fill="x", pady=(0, 6))
+        tk.Label(mode_controls, text="Command mode", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
+        self.mode_box = ttk.Combobox(mode_controls, textvariable=self.command_mode, state="readonly", width=34,
+                                    values=list(config.COMMAND_MODES.values()))
+        self.mode_box.pack(side="left")
+        self.mode_box.bind("<<ComboboxSelected>>", lambda event: self.change_command_mode())
+        tk.Label(mode_controls, text="Direct mode acts on complete commands while listening.",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=10)
         diagnostics.pack(fill="x", pady=(0, 10))
         self.assist_check = tk.Checkbutton(diagnostics, text="Command assist (experimental)",
                                            variable=self.command_assist, bg=BG, fg=INK, font=("Segoe UI", 10))
@@ -176,7 +186,7 @@ class Prototype:
         test.pack(fill="x", pady=(12, 4))
         tk.Label(test, text="Text-only parser check (bypasses ASR):", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
         self.test_input = ttk.Entry(test, width=31, font=("Segoe UI", 10))
-        self.test_input.insert(0, "Hey Slides, next slide")
+        self.test_input.insert(0, "Next slide" if config.DEFAULT_COMMAND_MODE == "direct" else "Hey Slides, next slide")
         self.test_input.pack(side="left", fill="x", expand=True, padx=9)
         self.test_input.bind("<Return>", lambda event: self.test_phrase())
         ttk.Button(test, text="Test phrase", command=self.test_phrase).pack(side="right")
@@ -216,9 +226,11 @@ class Prototype:
                 self.powerpoint_state = self.powerpoint.snapshot()
                 self.show_slide()
             self.parser.reset()
+            mode = self.selected_command_mode()
+            self.parser = CommandParser(require_prefix=mode == "wake")
             profile = next(key for key, item in config.MODEL_PROFILES.items() if item["label"] == self.model_profile.get())
             self.session.start(self.devices.get(self.device.get()), model_profile=profile,
-                               command_assist=self.command_assist.get(), record_audio=self.record_audio.get())
+                               command_assist=self.command_assist.get(), record_audio=self.record_audio.get(), command_mode=mode)
             self.active_session = self.session.session_id
             self.listening = True
             self.start_button.configure(state="disabled")
@@ -226,21 +238,40 @@ class Prototype:
             self.device_box.configure(state="disabled")
             self.refresh_button.configure(state="disabled")
             self.model_box.configure(state="disabled")
+            self.mode_box.configure(state="disabled")
             self.assist_check.configure(state="disabled")
             self.record_check.configure(state="disabled")
             self.play_button.configure(state="disabled")
             if self.record_audio.get():
                 self.last_recording = None
             self.status.set("Starting microphone...")
-            self.command_status.set("Command prefix: Hey Slides")
+            self.command_status.set(self.command_hint())
             self.log("start", device=self.device.get(), model_profile=profile,
                      command_assist=self.command_assist.get(), record_audio=self.record_audio.get(),
-                     session_id=self.active_session)
+                     session_id=self.active_session, command_mode=mode)
         except Exception as exc:
             if isinstance(exc, PowerPointError):
                 self.powerpoint_state = None
                 self.show_slide()
             self.status.set(str(exc))
+
+    def selected_command_mode(self):
+        return next(key for key, label in config.COMMAND_MODES.items() if label == self.command_mode.get())
+
+    def command_hint(self):
+        return ("Direct commands | Next slide / Previous slide / Go to slide five"
+                if self.selected_command_mode() == "direct" else "Command prefix: Hey Slides")
+
+    def change_command_mode(self):
+        if self.listening or self.session.running:
+            self.stop()
+        mode = self.selected_command_mode()
+        self.parser = CommandParser(require_prefix=mode == "wake")
+        self.command_status.set(self.command_hint())
+        self.test_input.delete(0, "end")
+        self.test_input.insert(0, "Next slide" if mode == "direct" else "Hey Slides, next slide")
+        self.show_slide()
+        self.log("command_mode_changed", command_mode=mode)
 
     def change_target(self):
         if self.listening:
@@ -346,6 +377,7 @@ class Prototype:
                     self.device_box.configure(state="readonly")
                     self.refresh_button.configure(state="normal")
                     self.model_box.configure(state="readonly")
+                    self.mode_box.configure(state="readonly")
                     self.assist_check.configure(state="normal")
                     self.record_check.configure(state="normal")
                     self.play_button.configure(state="normal" if self.last_recording else "disabled")
@@ -382,7 +414,7 @@ class Prototype:
         decision = self.parser.accept(text, utterance_id)
         messages = {"armed": "Hey Slides detected | say a command within 4 seconds",
                     "ordinary speech": "Ordinary speech | no slide action",
-                    "unrecognized command": "Use next slide, previous slide, or go to slide five"}
+                    "unrecognized command": "No action | use a complete command: next slide, previous slide, or go to slide five"}
         self.command_status.set(messages.get(decision.status, decision.status))
         if decision.action:
             self.apply_action(decision.action, source, decision.target_slide)
@@ -438,7 +470,7 @@ class Prototype:
             state = self.powerpoint_state
             self.slide_title.configure(text=f"Slide {state.slide}" if state else "Connect a slideshow.")
             self.slide_kicker.configure(text=state.name if state else "Windows desktop PowerPoint")
-            self.slide_body.configure(text=("Displayed slide index confirmed by PowerPoint. Say Hey Slides, next slide, previous slide, or go to slide five."
+            self.slide_body.configure(text=("Displayed slide index confirmed by PowerPoint. " + self.command_hint()
                                              if state else "Open your presentation and start its slideshow. Then click Connect / refresh PowerPoint. Commands never fall back to the demo viewer."))
             self.slide_number.set(f"{state.slide:02d} / {state.count:02d}" if state else "-- / --")
             return

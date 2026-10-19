@@ -64,6 +64,8 @@ def class_role(word: str) -> str:
 # Prototipe ASR pretrained: kosakata bebas, bukan classifier 23 kelas di atas.
 COMMAND_PREFIX = "hey slides"
 COMMAND_PREFIXES = (COMMAND_PREFIX, "hey slide")
+COMMAND_MODES = {"direct": "Direct commands (no wake phrase)", "wake": "Require Hey Slides"}
+DEFAULT_COMMAND_MODE = "direct"
 MODEL_PROFILES = {
     "light": {"name": "vosk-model-small-en-us-0.15", "size_mb": 40,
               "label": "Light English (40 MB)", "queue_blocks": 12, "max_queue_ms": 500},

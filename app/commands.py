@@ -37,13 +37,14 @@ def slide_number(text: str) -> int | None:
 
 
 class CommandParser:
-    """Strict phrase grammar with a short window for a separately spoken prefix.
+    """Exact direct commands, or a prefix with a short separate-utterance window.
 
     Utterance IDs deduplicate delivery, not text: two intentionally repeated
     commands with different IDs both work. All times are monotonic seconds.
     """
 
-    def __init__(self, wake_timeout: float = 4.0):
+    def __init__(self, wake_timeout: float = 4.0, require_prefix: bool = True):
+        self.require_prefix = require_prefix
         self.wake_timeout = wake_timeout
         self.armed_until = 0.0
         self._seen = deque(maxlen=256)
@@ -64,24 +65,28 @@ class CommandParser:
         text = " ".join(re.findall(r"[a-z0-9]+", text.lower()))
         if not text:
             return Decision("empty")
-        if text in COMMAND_PREFIXES:
+        if not self.require_prefix:
+            command = text
+        elif text in COMMAND_PREFIXES:
             self.armed_until = now + self.wake_timeout
             return Decision("armed")
-        prefix = next((item for item in COMMAND_PREFIXES if text.startswith(item + " ")), None)
-        if prefix:
-            command = text[len(prefix):].strip()
-        elif now < self.armed_until:
-            command = text
         else:
-            self.armed_until = 0.0
-            return Decision("ordinary speech")
+            prefix = next((item for item in COMMAND_PREFIXES if text.startswith(item + " ")), None)
+            if prefix:
+                command = text[len(prefix):].strip()
+            elif now < self.armed_until:
+                command = text
+            else:
+                self.armed_until = 0.0
+                return Decision("ordinary speech")
         # A prefix authorizes only the following complete utterance.
         self.armed_until = 0.0
         actions = {"next slide": "next", "next slides": "next",
                    "previous slide": "previous", "previous slides": "previous"}
         action = actions.get(command)
-        if command.startswith("go to slide "):
-            target = slide_number(command[len("go to slide "):])
+        number_prefix = next((prefix for prefix in ("go to slide ", "go to slides ") if command.startswith(prefix)), None)
+        if number_prefix:
+            target = slide_number(command[len(number_prefix):])
             if target is not None:
                 return Decision("command", "goto", target)
         return Decision("command" if action else "unrecognized command", action)

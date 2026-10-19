@@ -11,7 +11,7 @@ from app.config import COMMAND_PREFIXES
 from app.recognition import StreamingRecognizer
 
 
-def command_grammar():
+def command_grammar(require_prefix=True):
     units = "zero one two three four five six seven eight nine".split()
     small = "ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
     tens = "twenty thirty forty fifty sixty seventy eighty ninety".split()
@@ -19,7 +19,9 @@ def command_grammar():
     # These digit sequences expose zero and repeated-digit transitions too.
     numbers += ["one zero", "one one", "one zero zero"]
     commands = ["next slide", "next slides", "previous slide", "previous slides"]
-    commands += [f"go to slide {number}" for number in numbers]
+    commands += [f"go to {noun} {number}" for noun in ("slide", "slides") for number in numbers]
+    if not require_prefix:
+        return ["[unk]", *commands]
     phrases = ["[unk]", *COMMAND_PREFIXES, *commands]
     phrases += [f"{prefix} {command}" for prefix in COMMAND_PREFIXES for command in commands]
     return list(dict.fromkeys(phrases))
@@ -42,13 +44,14 @@ def assess_candidate(event, minimum_word_score=0.55, minimum_mean_score=0.80):
 
 
 class CommandRecognizer:
-    def __init__(self, model, sample_rate=16000):
+    def __init__(self, model, sample_rate=16000, require_prefix=True):
         self.model = model
         self.sample_rate = sample_rate
+        self.require_prefix = require_prefix
         self.reset()
 
     def reset(self):
-        self.decoder = StreamingRecognizer(self.model, self.sample_rate, grammar=command_grammar())
+        self.decoder = StreamingRecognizer(self.model, self.sample_rate, grammar=command_grammar(self.require_prefix))
 
     def feed(self, pcm):
         event = self.decoder.feed(pcm)

@@ -16,6 +16,9 @@ def main():
     ui = Prototype(root)
     try:
         root.update()
+        assert ui.selected_command_mode() == "direct"
+        ui.command_mode.set("Require Hey Slides")
+        ui.change_command_mode()
         ui.active_session = "test"
         ui.listening = True
         ui.session.events.put({"session_id": "test", "kind": "partial",
@@ -96,7 +99,53 @@ def main():
         ui.target.set("Demo slides")
         ui.change_target()
         assert not ui.listening and ui.parser.armed_until == 0
-        print("UI integration OK: transcription, parser, Stop, stale events, heatmap, goto, PowerPoint routing/failure, target changes")
+        ui.command_mode.set("Direct commands (no wake phrase)")
+        ui.change_command_mode()
+        assert not ui.parser.require_prefix and ui.test_input.get() == "Next slide"
+        ui.active_session = "direct"
+        ui.listening = True
+        def direct_event(kind="command_final", **overrides):
+            event = {"session_id": "direct", "kind": kind, "text": "next slides",
+                     "utterance_id": "direct-next", "allow_action": True,
+                     "eligible": True, "reason": "candidate", "words": [], "decode_ms": 1, "changed": True}
+            event.update(overrides)
+            ui.session.events.put(event)
+            ui.poll()
+        direct_event("partial")
+        assert ui.deck.index == 0
+        direct_event("final", transcript_only=True, allow_action=False)
+        assert ui.deck.index == 0
+        direct_event()
+        assert ui.deck.index == 1
+        direct_event()
+        assert ui.deck.index == 1, "Direct event duplicate must not repeat"
+        direct_event(utterance_id="direct-reject", eligible=False, reason="low model score")
+        assert ui.deck.index == 1
+        direct_event(utterance_id="direct-previous", text="previous slides")
+        assert ui.deck.index == 0
+        direct_event(utterance_id="direct-goto", text="go to slide five")
+        assert ui.deck.index == 4
+        ui.stop()
+        direct_event(utterance_id="direct-after-stop", text="previous slide")
+        assert ui.deck.index == 4
+        ui.command_mode.set("Require Hey Slides")
+        ui.change_command_mode()
+        assert ui.parser.require_prefix and ui.parser.armed_until == 0
+        ui.handle_final("previous slide", "wake-mode-bare-command", "text test")
+        assert ui.deck.index == 4
+        from unittest.mock import patch
+        ui.command_mode.set("Direct commands (no wake phrase)")
+        ui.change_command_mode()
+        with patch.object(ui.session, "start") as start:
+            ui.start()
+            assert start.call_args.kwargs["command_mode"] == "direct"
+            assert ui.listening and str(ui.mode_box.cget("state")) == "disabled"
+        ui.stop()
+        ui.session.events.put({"kind": "stopped", "session_id": ui.active_session})
+        ui.poll()
+        assert str(ui.mode_box.cget("state")) == "readonly"
+        root.update_idletasks()
+        print("UI integration OK: direct/wake mode, worker configuration, transcription, parser, Stop, stale events, heatmap, goto, PowerPoint routing/failure, target changes")
     finally:
         ui.close()
 

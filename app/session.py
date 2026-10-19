@@ -28,14 +28,16 @@ class MicrophoneSession:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, device=None, model_profile=config.DEFAULT_MODEL_PROFILE,
-              command_assist=True, record_audio=False):
+              command_assist=True, record_audio=False, command_mode="wake"):
+        if command_mode not in config.COMMAND_MODES:
+            raise ValueError("Unknown command mode")
         if self.running:
             raise RuntimeError("Previous audio session is still stopping. Try again shortly.")
         self._stop.clear()
         self.session_id = uuid.uuid4().hex
         model_dir = config.model_path(model_profile)
         self._thread = threading.Thread(target=self._run,
-                                        args=(device, model_profile, model_dir, command_assist, record_audio), daemon=True)
+                                        args=(device, model_profile, model_dir, command_assist, record_audio, command_mode), daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -44,7 +46,7 @@ class MicrophoneSession:
     def _emit(self, kind, **payload):
         self.events.put({"kind": kind, "session_id": self.session_id, **payload})
 
-    def _run(self, device, model_profile, model_dir, command_assist=True, record_audio=False):
+    def _run(self, device, model_profile, model_dir, command_assist=True, record_audio=False, command_mode="wake"):
         profile_settings = config.MODEL_PROFILES[model_profile]
         audio = queue.Queue(maxsize=profile_settings["queue_blocks"])
         max_age_ms = profile_settings["max_queue_ms"]
@@ -75,7 +77,8 @@ class MicrophoneSession:
             if self._stop.is_set():
                 return
             recognizer = StreamingRecognizer(self._model, config.SAMPLE_RATE)
-            command_recognizer = CommandRecognizer(self._model, config.SAMPLE_RATE) if command_assist else None
+            command_recognizer = CommandRecognizer(self._model, config.SAMPLE_RATE,
+                                                  require_prefix=command_mode == "wake") if command_assist else None
             extractor = ManualMFCC()
             rolling = np.empty(0, dtype=np.float32)
             last_features = 0.0
@@ -91,7 +94,8 @@ class MicrophoneSession:
             with sd.RawInputStream(samplerate=config.SAMPLE_RATE,
                                    blocksize=config.AUDIO_BLOCK_SAMPLES,
                                    device=device, channels=1, dtype="int16", callback=callback):
-                self._emit("status", text="Listening | say: Hey Slides, next slide")
+                example = "Next slide" if command_mode == "direct" else "Hey Slides, next slide"
+                self._emit("status", text=f"Listening | say: {example}")
                 while not self._stop.is_set():
                     if discontinuity.is_set():
                         raise RuntimeError("Audio was lost or overflowed. Listening stopped; restart after checking the microphone/load.")

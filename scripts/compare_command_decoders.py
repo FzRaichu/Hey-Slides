@@ -15,10 +15,13 @@ from app.commands import CommandParser
 from app.recognition import StreamingRecognizer, load_model
 
 
-def compare(path, profile="light", model=None):
+def compare(path, profile="light", model=None, command_mode="wake"):
+    if command_mode not in config.COMMAND_MODES:
+        raise ValueError("Unknown command mode")
     model = load_model(config.model_path(profile)) if model is None else model
-    decoders = {"unrestricted": StreamingRecognizer(model), "command_focused": CommandRecognizer(model)}
-    parsers = {name: CommandParser() for name in decoders}
+    decoders = {"unrestricted": StreamingRecognizer(model),
+                "command_focused": CommandRecognizer(model, require_prefix=command_mode == "wake")}
+    parsers = {name: CommandParser(require_prefix=command_mode == "wake") for name in decoders}
     output = {name: [] for name in decoders}
     samples = 0
 
@@ -50,7 +53,7 @@ def compare(path, profile="light", model=None):
             collect("command_focused", focused)
         for name, decoder in decoders.items():
             collect(name, decoder.finish(), eof=True)
-    return {"source": str(Path(path).resolve()), "model_profile": profile,
+    return {"source": str(Path(path).resolve()), "model_profile": profile, "command_mode": command_mode,
             "audio_seconds": samples / 16000, "results": output,
             "note": "Offline comparison only. Focused scores are not calibrated; proposed actions were not executed."}
 
@@ -60,8 +63,9 @@ def main():
     parser.add_argument("wav", type=Path)
     parser.add_argument("--profile", choices=config.MODEL_PROFILES, default="light")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--command-mode", choices=config.COMMAND_MODES, default="wake")
     args = parser.parse_args()
-    result = compare(args.wav, args.profile)
+    result = compare(args.wav, args.profile, command_mode=args.command_mode)
     text = json.dumps(result, indent=2)
     print(text)
     if args.output:

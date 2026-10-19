@@ -35,15 +35,17 @@ class AudioSessionTests(unittest.TestCase):
                                          "decode_ms": 1, "words": []}
             general.finish.return_value = {"kind": "final", "changed": True, "text": "", "decode_ms": None, "words": []}
             focused = MagicMock()
-            focused.feed.return_value = {"kind": "final", "changed": True, "text": "hey slides next slide",
+            focused.feed.return_value = {"kind": "final", "changed": True, "text": "next slides",
                                          "decode_ms": 1, "words": [], "eligible": True, "reason": "candidate"}
             with patch("app.session.load_model", return_value=object()), \
                  patch("app.session.StreamingRecognizer", return_value=general), \
-                 patch("app.session.CommandRecognizer", return_value=focused), \
+                 patch("app.session.CommandRecognizer", return_value=focused) as make_focused, \
                  patch("sounddevice.RawInputStream", side_effect=make_stream), \
                  patch("sounddevice.check_input_settings"), \
                  patch("app.session.config.LOG_DIR", Path(folder)):
-                session._run(None, "light", config.model_path("light"), command_assist=True, record_audio=True)
+                session._run(None, "light", config.model_path("light"), command_assist=True,
+                             record_audio=True, command_mode="direct")
+            self.assertFalse(make_focused.call_args.kwargs["require_prefix"])
             events = []
             while not session.events.empty():
                 events.append(session.events.get_nowait())
@@ -53,7 +55,7 @@ class AudioSessionTests(unittest.TestCase):
             self.assertFalse(normal["allow_action"])
             self.assertTrue(normal["transcript_only"])
             command = next(event for event in events if event["kind"] == "command_final")
-            self.assertEqual(command["text"], "hey slides next slide")
+            self.assertEqual(command["text"], "next slides")
             self.assertTrue(command["allow_action"])
             saved = next(event for event in events if event["kind"] == "recording_saved")
             with wave.open(saved["path"], "rb") as recording:
