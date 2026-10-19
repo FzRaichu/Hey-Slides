@@ -19,6 +19,7 @@ import numpy as np
 
 from app import config
 from app.recognition import load_model
+from app.whisper_recognition import load_whisper_model, transcribe_audio, VAD_SETTINGS
 from scripts.compare_command_decoders import compare
 from scripts.evaluation_metrics import word_errors
 
@@ -36,13 +37,14 @@ def main():
     parser.add_argument("--references", type=Path)
     parser.add_argument("--output", type=Path, default=Path("logs/recognizer-benchmark.json"))
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--segmentation", choices=("whole", "vad", "context"), default="whole")
+    parser.add_argument("--command-mode", choices=config.COMMAND_MODES, default="wake")
     args = parser.parse_args()
     if args.threads < 1:
         parser.error("--threads must be positive")
     if not (args.whisper_model / "model.bin").is_file():
         parser.error("Download the evaluation model first: python -m scripts.download_whisper_evaluation")
     print("Loading optional Whisper runtime", flush=True)
-    from faster_whisper import WhisperModel
 
     references = json.loads(args.references.read_text(encoding="utf-8")) if args.references else {}
     print("Loading local Vosk and Whisper models", flush=True)
@@ -50,18 +52,19 @@ def main():
     vosk = load_model(config.model_path("light"))
     vosk_load = time.perf_counter() - started
     started = time.perf_counter()
-    whisper = WhisperModel(str(args.whisper_model.resolve()), device="cpu", compute_type="int8",
-                           cpu_threads=args.threads, local_files_only=True, num_workers=1)
+    whisper = load_whisper_model(args.whisper_model, args.threads)
     whisper_load = time.perf_counter() - started
     provenance_path = args.whisper_model / "evaluation-provenance.json"
     result = {
         "mode": "offline; no microphone, presentation actions, or audio upload",
+        "vosk": {"profile": "light", "command_mode": args.command_mode},
         "environment": {"python": platform.python_version(), "platform": platform.platform(),
                         "processor": platform.processor(), "logical_cpus": os.cpu_count(),
                         "versions": {p: version(p) for p in ("faster-whisper", "ctranslate2", "vosk", "numpy",
                                                                "av", "onnxruntime", "tokenizers", "huggingface-hub")}},
         "whisper": {"model": str(args.whisper_model.resolve()), "device": "cpu", "compute_type": "int8",
-                    "threads": args.threads, "beam_size": 5, "language": "en", "vad_filter": True,
+                    "threads": args.threads, "beam_size": 5, "language": "en", "segmentation": args.segmentation,
+                    "vad_filter": True, "external_vad_settings": VAD_SETTINGS if args.segmentation != "whole" else None,
                     "condition_on_previous_text": False, "initial_prompt": None, "hotwords": None,
                     "provenance": json.loads(provenance_path.read_text(encoding="utf-8")) if provenance_path.exists() else None},
         "load_seconds": {"vosk": vosk_load, "whisper": whisper_load},
@@ -79,12 +82,11 @@ def main():
             pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").astype(np.float32) / 32768
         print(f"Decoding {path.name}", flush=True)
         started = time.perf_counter()
-        baseline = compare(path, model=vosk)
+        baseline = compare(path, model=vosk, command_mode=args.command_mode)
         vosk_seconds = time.perf_counter() - started
         started = time.perf_counter()
-        segments, info = whisper.transcribe(pcm, language="en", beam_size=5, vad_filter=True,
-                                            condition_on_previous_text=False)
-        segments = [{"start": s.start, "end": s.end, "text": s.text.strip()} for s in segments]
+        transcription = transcribe_audio(whisper, pcm, segmentation=args.segmentation)
+        segments = transcription["segments"]
         whisper_seconds = time.perf_counter() - started
         hypotheses = {
             "vosk_general": " ".join(e["text"] for e in baseline["results"]["unrestricted"]),
@@ -94,7 +96,7 @@ def main():
         reference = references.get(path.name, {})
         clip = {"source": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "audio_seconds": baseline["audio_seconds"], "vosk": baseline["results"],
-                "whisper_segments": segments, "hypotheses": hypotheses,
+                "whisper_segments": segments, "whisper_spans": transcription["spans"], "hypotheses": hypotheses,
                 "decode_seconds": {"vosk_both_decoders": vosk_seconds, "whisper_general": whisper_seconds},
                 "offline_real_time_factor": {"vosk_both_decoders": vosk_seconds / baseline["audio_seconds"],
                                              "whisper_general": whisper_seconds / baseline["audio_seconds"]},

@@ -420,6 +420,42 @@ companion for Windows PowerPoint. Hosted code cannot use this laptop's COM
 adapter directly. Keep both interfaces against shared command semantics rather
 than duplicating recognition logic. No hosting architecture is committed yet.
 
+### Phase 7e Whisper small.en and segmentation, 19 October 2026
+
+The [comparison report](report/Phase_7e_Whisper_Comparison.md) records all five
+model/segmentation configurations, including the historical base.en baseline.
+Small.en did not consistently beat base.en: its best tested configuration tied
+the prior 25% WER on the only complete confirmed 12-word reference. Tiny isolated
+VAD spans caused errors and substantial decoding cost. Grouped context recovered
+more distinctions in the long clip but is not validated general transcription.
+The live desktop recognizers remain unchanged; `app/whisper_recognition.py` is
+currently an evaluation module, not a new option on the microphone screen.
+
+Download the optional candidate and compare local recordings:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-evaluation.txt
+.\.venv\Scripts\python.exe -m scripts.download_whisper_evaluation --model small.en
+$clips = Get-ChildItem logs/input-*.wav
+.\.venv\Scripts\python.exe -m scripts.benchmark_recognizers @($clips.FullName) --whisper-model models/faster-whisper-small.en --segmentation context --references logs/evaluation-references.json --output logs/benchmark-small-context.json
+```
+
+Use `--segmentation whole` for the old internal-VAD path or `--segmentation vad`
+for independently decoded VAD spans. Keep outputs separate. The default command
+comparison mode is wake, matching the older recordings; add `--command-mode
+direct` for new bare-command recordings. Decoding uses no answer prompt, command
+hotwords, cloud service, or presentation actions. It consumes the full generator.
+The downloader now uses standard HTTPS for model weights, reports progress, and
+checks the published SHA256 before installing them. `--model base.en` remains
+available. No models or private speech are committed.
+
+Next use the [controlled reading script](report/Recognition_Test_Script.md) to
+obtain a complete ordinary-speech reference and direct-command action checks.
+The script is not ground truth until the actual spoken wording is confirmed.
+Only English recognition has been compared here; Indonesian or mixed-language
+presentations require a multilingual candidate. These offline timings do not
+validate live CPU coexistence or the 200 ms target. Sixty regression tests pass.
+
 ## Phase commits
 
 The prototype baseline (Phases 2–5) is commit `8e272ec`. Phase 6 adds PowerPoint
