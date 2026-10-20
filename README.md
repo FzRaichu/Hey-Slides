@@ -10,6 +10,38 @@ Pretrained models were accepted by the lecturer according to the student on
 17 October 2026. The exact acceptance of the separate manual-feature branch
 still needs to be established.
 
+## Lecturer demo interface, 20 October 2026
+
+The main screen now shows **Pengenalan pretrained** and **MFCC manual** side by
+side, with Start/Stop, target selection, slide status, and action history. Vosk
+still supplies all voice navigation. MFCC shows the real heatmap and numeric
+features; it is explicitly **not a second trained recognizer** and supplies no
+words or slide actions. No MFCC classifier has been added.
+
+Audio/model/mode selectors, opt-in recording, playback, timing diagnostics,
+feature export, and the text-only parser test are under **Pengaturan**. The
+PowerPoint connect button appears when that target is selected. Defaults remain
+Light English + Direct commands + Command assist; microphone and recording stay
+off until the user starts/enables them. Detailed guide:
+[Petunjuk demo untuk dosen](report/PANDUAN_DEMO_PROTOTIPE.md).
+
+The UI layout lives in `app/demo_view.py`; session, inference, parser, MFCC math,
+and PowerPoint routing retain their existing responsibilities. UI-only action
+history is shortened but full source/target information remains in the local log.
+
+Verification: 61 unit/regression tests, existing desktop integration, and new
+layout checks at 960x660 and 1120x740 passed. The new check verifies hidden
+settings, complete panel text, numeric feature output without navigation, and
+settings accessibility. Test-window renders use simulated events and synthetic
+feature input, not a real speech-accuracy demonstration:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.verify_ui
+.\.venv\Scripts\python.exe -m scripts.verify_demo_layout
+# Optional: Windows render of the test window only, no microphone or Office.
+.\.venv\Scripts\python.exe -m scripts.verify_demo_layout --capture logs/demo-ui-qa.png
+```
+
 ## Run on this computer
 
 Double-click **Start Prototype.cmd**, or use PowerShell:
@@ -19,7 +51,7 @@ cd 'C:\Binus Semester 5\Speech Recognition\voice-slide'
 & '.venv\Scripts\python.exe' -m app.main
 ```
 
-Choose a microphone, click **Start listening**, and speak English. Audio is
+Choose a microphone, click **Mulai mendengarkan**, and speak English. Audio is
 processed locally. The microphone stays off until Start is clicked.
 
 - Select **Direct commands (no wake phrase)**. This is the new application default.
@@ -69,10 +101,10 @@ comparable to wall-clock times or the unrestricted decoder's full-stream times.
 
 To diagnose the audio instead of guessing from bad text:
 
-1. Select the microphone carrying your voice and enable **Record input for diagnosis**.
+1. Select the microphone carrying your voice and enable **Rekam input untuk evaluasi**.
 2. Select Direct commands and click Start. Say a short ordinary sentence, then
    `Next slides` and `Previous slides`, pausing after each phrase.
-3. Click Stop, then **Play captured input**.
+3. Click Stop, then **Putar rekaman terakhir**.
 4. Check whether your voice is clear, loud enough, and played at a natural speed.
    Silence, a distant voice, distortion, or unexpected speakers suggest checking
    microphone selection, Windows gain, or Remote Desktop redirection before
@@ -101,9 +133,9 @@ model or change the role of our separate manual MFCC analysis.
 1. Install the updated dependencies with the command below if this is an older checkout.
 2. Open your presentation in **Windows desktop PowerPoint** and start its slideshow
    (F5, or Shift+F5 from the current slide). Use **All slides** in Set Up Slide Show.
-3. In Hey Slides choose **PowerPoint**, then click **Connect / refresh PowerPoint**.
+3. In Hey Slides choose **PowerPoint**, then click **Hubungkan PowerPoint**.
    Exactly one slideshow must be running when you connect.
-4. Check the connected presentation name and slide number, then click **Start listening**.
+4. Check the connected presentation name and slide number, then click **Mulai mendengarkan**.
 5. Say a complete command, then pause so recognition can finalize it.
 
 ```powershell
