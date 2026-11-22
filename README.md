@@ -166,7 +166,7 @@ undo a command already dispatched to PowerPoint.
 ## Fresh installation (Python 3.12 recommended)
 
 ```powershell
-python -m venv .venv
+py -3.12 -m venv .venv   # or: python -m venv .venv, if python is already 3.12
 & '.venv\Scripts\python.exe' -m pip install -r requirements-prototype.txt
 & '.venv\Scripts\python.exe' -m scripts.download_model
 & '.venv\Scripts\python.exe' -m scripts.check_prototype
@@ -179,6 +179,30 @@ audio to a cloud API. Use `requirements-prototype.txt` and `check_prototype` for
 this version. The original `requirements.txt`, dataset scripts, root planning
 documents, and Bab 1–3 draft describe the earlier MFCC/SVM direction and have
 not yet been consolidated or rewritten.
+
+## Portable Windows build (.exe)
+
+Build a folder that runs on Windows 10/11 without Python or internet. Do this after
+the fresh installation above, so `.venv` and the Light English model exist:
+
+```powershell
+& '.venv\Scripts\python.exe' -m pip install -r requirements-build.txt
+powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+```
+
+Output:
+
+- `dist\VoiceSlideControl\VoiceSlideControl.exe`: double-click to open the app.
+- `dist\VoiceSlideControl-win64.zip` (about 80 MB): share this zip with testers.
+  They extract the whole folder and run the `.exe`. The `models` and `_internal`
+  folders must stay next to it.
+
+The Vosk model is bundled under `models\` beside the exe. Session logs and WAV
+recordings are written to `logs\` beside the exe. `VoiceSlideControl.exe --self-test`
+loads the model, checks the microphone at 16 kHz mono and pywin32 COM, writes
+`logs\self-test.txt`, and exits with code 0 (pass) or 1 (fail). The build is
+unsigned, so Windows SmartScreen may warn on first launch ("More info" → "Run anyway").
+During development keep using `python -m app.main`.
 
 ## Recognition quality and model comparison (Phase 7a)
 

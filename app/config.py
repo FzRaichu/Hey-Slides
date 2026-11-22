@@ -7,6 +7,7 @@ cukup ubah di file ini saja.
 """
 
 from pathlib import Path
+import sys
 
 # ---------------------------------------------------------------------------
 # Lokasi folder
@@ -14,7 +15,12 @@ from pathlib import Path
 # __file__ = .../voice-slide/app/config.py
 # .parent  = .../voice-slide/app
 # .parent  = .../voice-slide          <- ini akar proyek
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Saat dijalankan sebagai .exe (PyInstaller), akar = folder tempat .exe berada,
+# sehingga folder models/ dan logs/ berada di samping VoiceSlideControl.exe.
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DATA_DIR = PROJECT_ROOT / "data" / "speech_commands"   # hasil ekstrak dataset
 REPORT_DIR = PROJECT_ROOT / "report"                   # bahan untuk laporan
