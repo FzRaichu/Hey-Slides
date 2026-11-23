@@ -6,7 +6,7 @@ It never captures other windows or uses a real user's speech.
 
 import argparse
 from pathlib import Path
-import tkinter as tk
+import customtkinter as ctk
 
 import numpy as np
 
@@ -65,7 +65,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path)
     args = parser.parse_args()
-    root = tk.Tk()
+    root = ctk.CTk()
     root.withdraw()
     ui = Prototype(root)
     try:
@@ -101,7 +101,7 @@ def main():
                 within(label, ui.mfcc_panel)
             within(ui.heatmap, ui.mfcc_panel)
             within(ui.transcript, ui.pretrained_panel)
-            within(ui.command_label, ui.pretrained_panel)
+            within(ui.command_label, ui.command_panel)
             assert not ui.connect_button.winfo_ismapped()
             assert not ui.model_box.winfo_ismapped(), "Advanced selectors must stay off the demo screen"
             print(f"Demo layout OK at {width}x{height}")
@@ -116,7 +116,7 @@ def main():
             within(widget, ui.settings_dialog)
         if args.capture:
             capture_window(ui.settings_dialog, args.capture.with_stem(f"{args.capture.stem}-settings"))
-        ui.settings_tabs.select(1)
+        ui.settings_tabs.set("Diagnostik / tes teks")
         root.update()
         within(ui.test_input, ui.settings_dialog)
         within(ui.save_features_button, ui.settings_dialog)
