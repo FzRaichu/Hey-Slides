@@ -192,13 +192,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
 
 Output:
 
-- `dist\VoiceSlideControl\VoiceSlideControl.exe`: double-click to open the app.
-- `dist\VoiceSlideControl-win64.zip` (about 80 MB): share this zip with testers.
+- `dist\HeySlides\HeySlides.exe`: double-click to open the app.
+- `dist\HeySlides-win64.zip` (about 80 MB): share this zip with testers.
   They extract the whole folder and run the `.exe`. The `models` and `_internal`
   folders must stay next to it.
 
 The Vosk model is bundled under `models\` beside the exe. Session logs and WAV
-recordings are written to `logs\` beside the exe. `VoiceSlideControl.exe --self-test`
+recordings are written to `logs\` beside the exe. `HeySlides.exe --self-test`
 loads the model, checks the microphone at 16 kHz mono and pywin32 COM, writes
 `logs\self-test.txt`, and exits with code 0 (pass) or 1 (fail). The build is
 unsigned, so Windows SmartScreen may warn on first launch ("More info" → "Run anyway").

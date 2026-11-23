@@ -8,10 +8,12 @@ import queue
 import tkinter as tk
 import uuid
 
+import customtkinter as ctk
 import numpy as np
 
 from app import config
 from app.commands import CommandParser, SlideDeck
+from app.demo_view import COMMAND_STYLES, THEME, build_demo_view
 from app.powerpoint import PowerPointAdapter, PowerPointError, PowerPointCommandError
 from app.session import MicrophoneSession
 
@@ -24,18 +26,20 @@ SLIDES = [
     ("Uji dan evaluasi", "05 / Pengujian", "Akurasi dan responsivitas masih perlu diuji pada pengguna."),
 ]
 
-BG, CARD, INK, MUTED, ACCENT = "#edf1f5", "#ffffff", "#14273c", "#53697e", "#087f78"
+ACTION_NAMES = {"next": "Next slide", "previous": "Previous slide", "goto": "Go to slide"}
+IDLE_LEVEL = "Level input: –"
 
 
 class Prototype:
     def __init__(self, root, powerpoint=None):
         self.root = root
-        root.title("Voice Slide Control | Prototipe")
-        width = max(960, min(1120, root.winfo_screenwidth() - 80))
-        height = max(660, min(740, root.winfo_screenheight() - 100))
+        root.title("Hey Slides | Voice Slide Control")
+        # CTk windows take geometry in unscaled units; the screen size is in physical pixels.
+        scale = ctk.ScalingTracker.get_window_scaling(root) if isinstance(root, ctk.CTk) else 1.0
+        width = int(max(960, min(1180, root.winfo_screenwidth() / scale - 80)))
+        height = int(max(660, min(760, root.winfo_screenheight() / scale - 100)))
         root.geometry(f"{width}x{height}")
         root.minsize(960, 660)
-        root.configure(bg=BG)
         self.parser = CommandParser(require_prefix=config.DEFAULT_COMMAND_MODE == "wake")
         self.deck = SlideDeck(count=len(SLIDES))
         self.powerpoint = powerpoint or PowerPointAdapter()
@@ -58,7 +62,7 @@ class Prototype:
         self.devices = {"Default microphone": None}
         self.device = tk.StringVar(value="Default microphone")
         self.model_profile = tk.StringVar(value=config.MODEL_PROFILES[config.DEFAULT_MODEL_PROFILE]["label"])
-        self.audio_quality = tk.StringVar(value="Mikrofon belum aktif")
+        self.audio_quality = tk.StringVar(value=IDLE_LEVEL)
         self.command_assist = tk.BooleanVar(value=True)
         self.record_audio = tk.BooleanVar(value=False)
         self.last_recording = None
@@ -71,8 +75,22 @@ class Prototype:
         root.after(50, self.poll)
 
     def _build(self):
-        from app.demo_view import build_demo_view
-        build_demo_view(self, (BG, CARD, INK, MUTED, ACCENT))
+        build_demo_view(self)
+
+    def set_command(self, text, kind="info"):
+        """Update the command banner; kind is info / ok / warn / error (see COMMAND_STYLES)."""
+        background, caption_color, caption = COMMAND_STYLES[kind]
+        self.command_status.set(text)
+        self.command_panel.configure(fg_color=background)
+        self.command_caption.configure(text=caption, text_color=caption_color)
+
+    def show_listening(self, on):
+        self.listen_badge.configure(text="●  Mendengarkan" if on else "●  Mikrofon nonaktif",
+                                    text_color=THEME["accent"] if on else THEME["idle"])
+        if not on:
+            self.mic_meter.set(0)
+        if self.last_mfcc is None:
+            self.redraw_heatmap()  # placeholder text depends on listening state
 
     def show_settings(self):
         if not self._closing:
@@ -100,7 +118,7 @@ class Prototype:
             for index, device in enumerate(sd.query_devices()):
                 if device["max_input_channels"] > 0:
                     self.devices[f"{index}: {device['name']}"] = index
-            self.device_box["values"] = list(self.devices)
+            self.device_box.configure(values=list(self.devices))
             if self.device.get() not in self.devices:
                 self.device.set("Default microphone")
         except Exception as exc:
@@ -122,11 +140,12 @@ class Prototype:
             self.active_session = self.session.session_id
             self.last_vector = None
             self.last_mfcc = None
-            self.heatmap.delete("all")
+            self.redraw_heatmap()
             self.feature_status.set("13 koefisien MFCC | menunggu audio")
             self.feature_values.set("Vektor fitur: menunggu audio mikrofon.")
             self.save_features_button.configure(state="disabled")
             self.listening = True
+            self.show_listening(True)
             self.start_button.configure(state="disabled")
             self.stop_button.configure(state="normal")
             self.device_box.configure(state="disabled")
@@ -139,7 +158,7 @@ class Prototype:
             if self.record_audio.get():
                 self.last_recording = None
             self.status.set("Menyiapkan mikrofon...")
-            self.command_status.set(self.command_hint())
+            self.set_command(self.command_hint())
             self.log("start", device=self.device.get(), model_profile=profile,
                      command_assist=self.command_assist.get(), record_audio=self.record_audio.get(),
                      session_id=self.active_session, command_mode=mode)
@@ -161,7 +180,7 @@ class Prototype:
             self.stop()
         mode = self.selected_command_mode()
         self.parser = CommandParser(require_prefix=mode == "wake")
-        self.command_status.set(self.command_hint())
+        self.set_command(self.command_hint())
         self.test_input.delete(0, "end")
         self.test_input.insert(0, "Next slide" if mode == "direct" else "Hey Slides, next slide")
         self.demo_hint.set("Ucapkan: Next slide  /  Previous slide  /  Go to slide three" if mode == "direct"
@@ -176,7 +195,7 @@ class Prototype:
         self.powerpoint.disconnect()
         self.powerpoint_state = None
         self.show_slide()
-        self.command_status.set(f"Target: {self.target.get()} | command authorization reset")
+        self.set_command(f"Target diganti ke {self.target.get()} | perintah sebelumnya direset")
         self.log("target_changed", target=self.target.get())
 
     def connect_powerpoint(self):
@@ -190,13 +209,13 @@ class Prototype:
         try:
             self.powerpoint_state = self.powerpoint.connect()
             self.status.set(f"Terhubung: {self.powerpoint_state.name} | mikrofon nonaktif")
-            self.command_status.set("PowerPoint siap | klik Mulai mendengarkan")
+            self.set_command("PowerPoint siap | klik Mulai mendengarkan")
             self.log("powerpoint_connected", presentation=self.powerpoint_state.name,
                      slide=self.powerpoint_state.slide, count=self.powerpoint_state.count)
         except PowerPointError as exc:
             self.powerpoint_state = None
             self.status.set(str(exc))
-            self.command_status.set("PowerPoint belum terhubung | aksi tidak dikirim")
+            self.set_command("PowerPoint belum terhubung | aksi tidak dikirim", "error")
             self.log("powerpoint_error", text=str(exc))
         self.show_slide()
 
@@ -205,7 +224,7 @@ class Prototype:
         self.parser.reset()
         self.session.stop()
         self.stop_button.configure(state="disabled")
-        self.command_status.set("Aksi dinonaktifkan | mikrofon berhenti")
+        self.set_command("Aksi dinonaktifkan | mikrofon berhenti")
         self.status.set("Menghentikan mikrofon...")
         self.log("stop_requested")
 
@@ -241,7 +260,7 @@ class Prototype:
                         self.handle_final(event["text"], event["utterance_id"], "command recognizer")
                     else:
                         self.parser.disarm()
-                        self.command_status.set(f"Command candidate rejected: {event['reason']}")
+                        self.set_command(f"Kandidat perintah ditolak ({event['reason']}) | tidak ada aksi", "warn")
                 elif kind == "recording_saved":
                     if event["seconds"] > 0:
                         self.last_recording = Path(event["path"])
@@ -249,6 +268,8 @@ class Prototype:
                 elif kind == "features":
                     self.last_vector = event["vector"]
                     self.draw_features(event["mfcc"])
+                    if event["rms"] < 0.003:
+                        self.heatmap_note("Hening: tidak ada suara terdeteksi")
                     self.feature_status.set(f"13 x {event['mfcc'].shape[1]} frame | 156 fitur | RMS {event['rms']:.3f}")
                     values = ", ".join(f"{value:.2f}" for value in self.last_vector[:6])
                     self.feature_values.set(f"Contoh 6 dari 156 nilai fitur:\n[{values}]")
@@ -259,17 +280,21 @@ class Prototype:
                     if event.get("clipped_fraction", 0) > 0.001:
                         note = "clipping: lower microphone gain"
                     self.audio_quality.set(f"Input: {dbfs:.0f} dBFS | {note}")
+                    if self.listening:
+                        self.mic_meter.set(float(np.clip((dbfs + 60) / 60, 0, 1)))
                     if getattr(self, "_last_audio_log", None) != int(datetime.now().timestamp()):
                         self._last_audio_log = int(datetime.now().timestamp())
                         self.log("audio_quality", rms=event["rms"], dbfs=float(dbfs),
                                  peak=event.get("peak"), clipped_fraction=event.get("clipped_fraction"))
                 elif kind == "error":
                     self.listening = False
+                    self.show_listening(False)
                     self.parser.reset()
                     self.status.set("Error: " + event["text"])
                     self.log("error", text=event["text"])
                 elif kind == "stopped":
                     self.listening = False
+                    self.show_listening(False)
                     self.parser.reset()
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
@@ -281,7 +306,7 @@ class Prototype:
                     self.record_check.configure(state="normal")
                     self.play_button.configure(state="normal" if self.last_recording else "disabled")
                     self.partial.set("Mikrofon nonaktif")
-                    self.audio_quality.set("Mikrofon nonaktif")
+                    self.audio_quality.set(IDLE_LEVEL)
                     if not self.status.get().startswith("Error:"):
                         self.status.set("Siap | mikrofon nonaktif" + (" | WAV tersimpan; buka Pengaturan untuk memutar" if self.last_recording else ""))
         except queue.Empty:
@@ -297,9 +322,11 @@ class Prototype:
 
     def handle_final(self, text, utterance_id, source, allow_action=True, transcript_only=False):
         self.transcript.configure(state="normal")
-        label = ("MIC" if source == "microphone" else "COMMAND ASR" if source == "command recognizer"
-                 else "TEXT TEST / not ASR")
-        self.transcript.insert("end", f"[{label}] {text}\n")
+        label = ("UCAPAN" if source == "microphone" else "PERINTAH" if source == "command recognizer"
+                 else "TES TEKS")
+        tag = {"UCAPAN": "mic", "PERINTAH": "cmd"}.get(label, "test")
+        self.transcript.insert("end", f"[{label}] ", tag)
+        self.transcript.insert("end", f"{text}\n")
         # Keep the visible transcript bounded; the full local log remains available.
         if int(self.transcript.index("end-1c").split(".")[0]) > 500:
             self.transcript.delete("1.0", "101.0")
@@ -308,13 +335,14 @@ class Prototype:
         if transcript_only:
             return
         if not allow_action:
-            self.command_status.set("Teks akhir tersimpan | aksi sudah dinonaktifkan")
+            self.set_command("Teks akhir tersimpan | aksi sudah dinonaktifkan")
             return
         decision = self.parser.accept(text, utterance_id)
         messages = {"armed": "Hey Slides dikenali | ucapkan perintah dalam 4 detik",
                     "ordinary speech": "Ucapan biasa | tidak ada aksi slide",
                     "unrecognized command": "Tidak ada aksi | ucapkan satu perintah lengkap"}
-        self.command_status.set(messages.get(decision.status, decision.status))
+        self.set_command(messages.get(decision.status, decision.status),
+                         "info" if decision.status == "armed" else "warn")
         if decision.action:
             self.apply_action(decision.action, source, decision.target_slide)
         self.log("command_decision", text=text, source=source, status=decision.status,
@@ -336,17 +364,17 @@ class Prototype:
             if target == "PowerPoint" and not isinstance(exc, PowerPointCommandError):
                 self.powerpoint_state = None
             self.show_slide()
-            self.command_status.set(f"Action failed: {exc}")
-            self.actions.insert(0, f"{datetime.now():%H:%M:%S} {action.upper()}: gagal [{source_label}]")
+            self.set_command(f"{ACTION_NAMES.get(action, action)} gagal: {exc}", "error")
+            self.actions.insert(0, f"{datetime.now():%H:%M:%S}  {ACTION_NAMES.get(action, action)}  gagal  ({source_label})")
             if self.actions.size() > 50:
                 self.actions.delete(50, "end")
             self.log("slide_action_failed", target=target, action=action, source=source,
                      target_slide=target_slide, error=str(exc))
             return
         self.show_slide()
-        text = f"{action.upper()} -> slide {slide}" + ("" if moved else " (unchanged)")
-        self.command_status.set(text)
-        self.actions.insert(0, f"{datetime.now():%H:%M:%S} {text} [{source_label}]")
+        text = f"{ACTION_NAMES.get(action, action)}  →  slide {slide}" + ("" if moved else "  (tidak berubah)")
+        self.set_command(text, "ok" if moved else "warn")
+        self.actions.insert(0, f"{datetime.now():%H:%M:%S}  {text}  ({source_label})")
         if self.actions.size() > 50:
             self.actions.delete(50, "end")
         self.log("slide_action", target=target, action=action, source=source, slide=slide, moved=moved,
@@ -369,19 +397,45 @@ class Prototype:
             self.connect_button.pack(side="left", padx=(7, 0), after=self.target_box)
             self.preview_caption.configure(text="POWERPOINT / STATUS SLIDE")
             state = self.powerpoint_state
-            self.slide_title.configure(text=f"Slide {state.slide}" if state else "Hubungkan slideshow.")
+            self.slide_title.configure(text=f"Slide {state.slide}" if state else "PowerPoint belum terhubung")
             self.slide_kicker.configure(text=state.name if state else "Windows desktop PowerPoint")
-            self.slide_body.configure(text=("Nomor slide dikonfirmasi dari PowerPoint; panel ini bukan gambar slide."
-                                             if state else "Buka presentasi dan mulai slideshow, lalu klik Hubungkan PowerPoint."))
-            self.slide_number.set(f"{state.slide:02d} / {state.count:02d}" if state else "-- / --")
+            self.slide_body.configure(text=(
+                "Nomor slide dikonfirmasi dari PowerPoint; panel ini bukan gambar slide." if state else
+                "1.  Buka file presentasi di PowerPoint desktop\n"
+                "2.  Tekan F5 untuk memulai slideshow\n"
+                "3.  Klik tombol Hubungkan PowerPoint di atas"))
+            self.slide_number.set(f"{state.slide:02d} / {state.count:02d}" if state else "– / –")
+            nav_state = "normal" if state else "disabled"
+            self.previous_button.configure(state=nav_state)
+            self.next_button.configure(state=nav_state)
             return
         self.connect_button.pack_forget()
+        self.previous_button.configure(state="normal")
+        self.next_button.configure(state="normal")
         self.preview_caption.configure(text="SLIDE DEMO")
         title, kicker, body = SLIDES[self.deck.index]
         self.slide_title.configure(text=title)
         self.slide_kicker.configure(text=kicker)
         self.slide_body.configure(text=body)
         self.slide_number.set(f"{self.deck.index + 1:02d} / {self.deck.count:02d}")
+
+    def redraw_heatmap(self):
+        if self.last_mfcc is not None:
+            self.draw_features(self.last_mfcc)
+            return
+        self.heatmap.delete("all")
+        text = ("Menunggu audio mikrofon..." if self.listening
+                else "Heatmap MFCC muncul setelah klik Mulai mendengarkan")
+        self.heatmap_note(text)
+
+    def heatmap_note(self, text):
+        width, height = max(1, self.heatmap.winfo_width()), max(1, self.heatmap.winfo_height())
+        # Canvas fonts are not scaled by CustomTkinter; use pixel size times window scaling.
+        size = -int(14 * ctk.ScalingTracker.get_widget_scaling(self.heatmap))
+        box = self.heatmap.create_text(width / 2, height / 2, text=text, fill="#c8d6e3", font=("Segoe UI", size))
+        x0, y0, x1, y1 = self.heatmap.bbox(box)
+        self.heatmap.tag_lower(self.heatmap.create_rectangle(x0 - 12, y0 - 6, x1 + 12, y1 + 6,
+                                                             fill=THEME["slide"], outline=""), box)
 
     def draw_features(self, mfcc):
         self.last_mfcc = mfcc
@@ -450,7 +504,7 @@ class Prototype:
 
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     Prototype(root)
     root.mainloop()
 

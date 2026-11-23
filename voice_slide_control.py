@@ -2,10 +2,10 @@
 
 During development keep using: python -m app.main
 
-    VoiceSlideControl.exe              -> open the app
-    VoiceSlideControl.exe --self-test  -> load model, check microphone and
-                                          PowerPoint COM, write logs/self-test.txt,
-                                          exit code 0 (ok) or 1 (problem)
+    HeySlides.exe              -> open the app
+    HeySlides.exe --self-test  -> load model, check microphone and
+                                  PowerPoint COM, write logs/self-test.txt,
+                                  exit code 0 (ok) or 1 (problem)
 """
 
 import sys

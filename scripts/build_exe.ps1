@@ -1,4 +1,4 @@
-# Build a portable Windows folder: dist\VoiceSlideControl\VoiceSlideControl.exe
+# Build a portable Windows folder: dist\HeySlides\HeySlides.exe
 #
 # Prerequisites (run once from the repository root):
 #   py -3.12 -m venv .venv
@@ -27,8 +27,9 @@ Write-Host "Running PyInstaller..."
 & $python -m PyInstaller `
     --noconfirm --clean `
     --onedir --windowed `
-    --name VoiceSlideControl `
+    --name HeySlides `
     --collect-binaries vosk `
+    --collect-data customtkinter `
     --hidden-import win32com.client `
     --exclude-module faster_whisper `
     --exclude-module ctranslate2 `
@@ -36,7 +37,7 @@ Write-Host "Running PyInstaller..."
     voice_slide_control.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
-$dist = Join-Path $root "dist\VoiceSlideControl"
+$dist = Join-Path $root "dist\HeySlides"
 $modelTarget = Join-Path $dist "models\$modelName"
 Write-Host "Copying model to $modelTarget ..."
 New-Item -ItemType Directory -Force (Split-Path $modelTarget) | Out-Null
@@ -44,10 +45,10 @@ if (Test-Path $modelTarget) { Remove-Item -Recurse -Force $modelTarget }
 Copy-Item -Recurse $modelSource $modelTarget
 
 @"
-Voice Slide Control - portable build
+Hey Slides (Voice Slide Control) - portable build
 
 1. Extract this whole folder (do not run the .exe from inside the zip).
-2. Double-click VoiceSlideControl.exe.
+2. Double-click HeySlides.exe.
 3. Keep the "models" and "_internal" folders next to the .exe.
 4. Session logs and WAV recordings are written to the "logs" folder here.
 
@@ -55,7 +56,7 @@ Needs Windows 10/11 and a microphone. No Python or internet required.
 PowerPoint control needs desktop Microsoft PowerPoint with a running slideshow (F5).
 "@ | Set-Content -Encoding utf8 (Join-Path $dist "README.txt")
 
-$zip = Join-Path $root "dist\VoiceSlideControl-win64.zip"
+$zip = Join-Path $root "dist\HeySlides-win64.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Write-Host "Creating $zip ..."
 Compress-Archive -Path $dist -DestinationPath $zip

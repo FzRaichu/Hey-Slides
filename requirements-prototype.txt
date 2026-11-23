@@ -2,4 +2,5 @@
 numpy==2.2.6
 vosk==0.3.45
 sounddevice==0.5.3
+customtkinter==5.2.2
 pywin32==311; sys_platform == "win32"

@@ -91,7 +91,7 @@ class PowerPointAdapter:
 
     def _window(self):
         if self._app is None:
-            raise PowerPointError("PowerPoint is not connected. Start its slideshow and click Connect.")
+            raise PowerPointError("PowerPoint belum terhubung. Mulai slideshow (F5), lalu klik Hubungkan PowerPoint.")
         for index in range(1, int(self._app.SlideShowWindows.Count) + 1):
             window = self._app.SlideShowWindows.Item(index)
             if self._identity(window) == self._show_identity and str(window.Presentation.FullName) == self._name:

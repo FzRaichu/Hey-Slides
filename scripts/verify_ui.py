@@ -3,7 +3,7 @@
 Exercises actual Tk widgets and queued events, not speech recognition accuracy.
 """
 
-import tkinter as tk
+import customtkinter as ctk
 import numpy as np
 
 from app.main import Prototype
@@ -11,7 +11,7 @@ from app.features import ManualMFCC
 
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     root.withdraw()
     ui = Prototype(root)
     try:

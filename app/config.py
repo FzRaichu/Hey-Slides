@@ -16,7 +16,7 @@ import sys
 # .parent  = .../voice-slide/app
 # .parent  = .../voice-slide          <- ini akar proyek
 # Saat dijalankan sebagai .exe (PyInstaller), akar = folder tempat .exe berada,
-# sehingga folder models/ dan logs/ berada di samping VoiceSlideControl.exe.
+# sehingga folder models/ dan logs/ berada di samping HeySlides.exe.
 if getattr(sys, "frozen", False):
     PROJECT_ROOT = Path(sys.executable).resolve().parent
 else:

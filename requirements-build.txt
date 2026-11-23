@@ -1,2 +1,2 @@
-# Packaging only (builds dist\VoiceSlideControl\VoiceSlideControl.exe).
+# Packaging only (builds dist\HeySlides\HeySlides.exe).
 pyinstaller==6.22.3
