@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import time
 import tkinter as tk
 import uuid
 
@@ -56,12 +57,14 @@ class Prototype:
         self.command_mode = tk.StringVar(value=config.COMMAND_MODES[config.DEFAULT_COMMAND_MODE])
         self.demo_hint = tk.StringVar(value="Ucapkan: Next slide  /  Previous slide  /  Go to slide three")
         self.timing = tk.StringVar(value="Decode: -- | MFCC: -- | queue: --")
+        self.latency = tk.StringVar(value="Latensi terakhir: belum ada perintah suara")
         self.feature_status = tk.StringVar(value="13 koefisien MFCC | menunggu audio")
         self.feature_values = tk.StringVar(value="Vektor fitur: menunggu audio mikrofon.")
         self.slide_number = tk.StringVar()
         self.devices = {"Default microphone": None}
         self.device = tk.StringVar(value="Default microphone")
         self.model_profile = tk.StringVar(value=config.MODEL_PROFILES[config.DEFAULT_MODEL_PROFILE]["label"])
+        self.endpoint_choice = tk.StringVar(value=config.ENDPOINT_SILENCE_OPTIONS[config.DEFAULT_ENDPOINT_SILENCE])
         self.audio_quality = tk.StringVar(value=IDLE_LEVEL)
         self.command_assist = tk.BooleanVar(value=True)
         self.record_audio = tk.BooleanVar(value=False)
@@ -135,8 +138,10 @@ class Prototype:
             mode = self.selected_command_mode()
             self.parser = CommandParser(require_prefix=mode == "wake")
             profile = next(key for key, item in config.MODEL_PROFILES.items() if item["label"] == self.model_profile.get())
+            endpoint = self.selected_endpoint_silence()
             self.session.start(self.devices.get(self.device.get()), model_profile=profile,
-                               command_assist=self.command_assist.get(), record_audio=self.record_audio.get(), command_mode=mode)
+                               command_assist=self.command_assist.get(), record_audio=self.record_audio.get(), command_mode=mode,
+                               endpoint_silence=endpoint)
             self.active_session = self.session.session_id
             self.last_vector = None
             self.last_mfcc = None
@@ -152,6 +157,7 @@ class Prototype:
             self.refresh_button.configure(state="disabled")
             self.model_box.configure(state="disabled")
             self.mode_box.configure(state="disabled")
+            self.endpoint_box.configure(state="disabled")
             self.assist_check.configure(state="disabled")
             self.record_check.configure(state="disabled")
             self.play_button.configure(state="disabled")
@@ -161,12 +167,16 @@ class Prototype:
             self.set_command(self.command_hint())
             self.log("start", device=self.device.get(), model_profile=profile,
                      command_assist=self.command_assist.get(), record_audio=self.record_audio.get(),
-                     session_id=self.active_session, command_mode=mode)
+                     session_id=self.active_session, command_mode=mode, endpoint_silence=endpoint)
         except Exception as exc:
             if isinstance(exc, PowerPointError):
                 self.powerpoint_state = None
                 self.show_slide()
             self.status.set(str(exc))
+
+    def selected_endpoint_silence(self):
+        return next(value for value, label in config.ENDPOINT_SILENCE_OPTIONS.items()
+                    if label == self.endpoint_choice.get())
 
     def selected_command_mode(self):
         return next(key for key, label in config.COMMAND_MODES.items() if label == self.command_mode.get())
@@ -246,7 +256,8 @@ class Prototype:
                     if event["text"]:
                         self.handle_final(event["text"], event["utterance_id"], "microphone",
                                           allow_action=self.listening and event["allow_action"],
-                                          transcript_only=self.listening and event.get("transcript_only", False))
+                                          transcript_only=self.listening and event.get("transcript_only", False),
+                                          timing=self._timing(event))
                         self.log("recognition", text=event["text"], words=event["words"],
                                  decode_ms=event["decode_ms"], session_id=self.active_session)
                     self._update_timing(event)
@@ -257,7 +268,8 @@ class Prototype:
                              eligible=event["eligible"], reason=event["reason"],
                              mean_score=event.get("mean_score"), decode_ms=event["decode_ms"])
                     if event["eligible"]:
-                        self.handle_final(event["text"], event["utterance_id"], "command recognizer")
+                        self.handle_final(event["text"], event["utterance_id"], "command recognizer",
+                                          timing=self._timing(event))
                     else:
                         self.parser.disarm()
                         self.set_command(f"Kandidat perintah ditolak ({event['reason']}) | tidak ada aksi", "warn")
@@ -302,6 +314,7 @@ class Prototype:
                     self.refresh_button.configure(state="normal")
                     self.model_box.configure(state="readonly")
                     self.mode_box.configure(state="readonly")
+                    self.endpoint_box.configure(state="readonly")
                     self.assist_check.configure(state="normal")
                     self.record_check.configure(state="normal")
                     self.play_button.configure(state="normal" if self.last_recording else "disabled")
@@ -320,7 +333,36 @@ class Prototype:
         fmt = lambda x: "--" if x is None else f"{x:.1f} ms"
         self.timing.set(f"Decode call: {fmt(decode)} | MFCC analysis: {fmt(mfcc)} | audio queue: {fmt(age)}")
 
-    def handle_final(self, text, utterance_id, source, allow_action=True, transcript_only=False):
+    def _timing(self, event):
+        """Worker timestamps for one final result (perf_counter seconds), or None."""
+        if event.get("speech_end_at") is None:
+            return None
+        return {"speech_end_at": event["speech_end_at"], "emitted_at": event.get("emitted_at")}
+
+    def record_latency(self, timing, source, text, action=None, outcome="transcript"):
+        """Log one latency sample measured from the end of the last recognized word.
+
+        endpoint_ms: word end -> recognizer emitted the final result (includes Vosk's
+                     trailing-silence wait). l1_ms: word end -> text shown on screen.
+        l2_ms: word end -> slide changed and redrawn (only when an action ran).
+        """
+        if not timing:
+            return None
+        end = timing["speech_end_at"]
+        ms = lambda key: None if timing.get(key) is None else round((timing[key] - end) * 1000, 1)
+        record = {"source": source, "text": text, "action": action, "outcome": outcome,
+                  "endpoint_ms": ms("emitted_at"), "l1_ms": ms("displayed_at"), "l2_ms": ms("action_done_at")}
+        self.log("latency", **record)
+        if source == "command recognizer" or record["l2_ms"] is not None:
+            parts = [f"L1 {record['l1_ms']:.0f} ms"] if record["l1_ms"] is not None else []
+            if record["l2_ms"] is not None:
+                parts.append(f"L2 {record['l2_ms']:.0f} ms")
+            if record["endpoint_ms"] is not None:
+                parts.append(f"tunggu endpoint {record['endpoint_ms']:.0f} ms")
+            self.latency.set("Latensi terakhir: " + " | ".join(parts))
+        return record
+
+    def handle_final(self, text, utterance_id, source, allow_action=True, transcript_only=False, timing=None):
         self.transcript.configure(state="normal")
         label = ("UCAPAN" if source == "microphone" else "PERINTAH" if source == "command recognizer"
                  else "TES TEKS")
@@ -332,7 +374,11 @@ class Prototype:
             self.transcript.delete("1.0", "101.0")
         self.transcript.see("end-2c")
         self.transcript.configure(state="disabled")
+        if timing:
+            self.transcript.update_idletasks()
+            timing = {**timing, "displayed_at": time.perf_counter()}
         if transcript_only:
+            self.record_latency(timing, source, text)
             return
         if not allow_action:
             self.set_command("Teks akhir tersimpan | aksi sudah dinonaktifkan")
@@ -344,11 +390,13 @@ class Prototype:
         self.set_command(messages.get(decision.status, decision.status),
                          "info" if decision.status == "armed" else "warn")
         if decision.action:
-            self.apply_action(decision.action, source, decision.target_slide)
+            self.apply_action(decision.action, source, decision.target_slide, timing=timing)
+        else:
+            self.record_latency(timing, source, text, outcome=decision.status)
         self.log("command_decision", text=text, source=source, status=decision.status,
                  action=decision.action, target_slide=decision.target_slide, utterance_id=utterance_id)
 
-    def apply_action(self, action, source, target_slide=None):
+    def apply_action(self, action, source, target_slide=None, timing=None):
         target = self.target.get()
         source_label = "suara" if source in ("microphone", "command recognizer") else "tombol" if source == "button" else "tes teks"
         elapsed_ms = None
@@ -365,6 +413,7 @@ class Prototype:
                 self.powerpoint_state = None
             self.show_slide()
             self.set_command(f"{ACTION_NAMES.get(action, action)} gagal: {exc}", "error")
+            self.record_latency(timing, source, ACTION_NAMES.get(action, action), action, outcome="failed")
             self.actions.insert(0, f"{datetime.now():%H:%M:%S}  {ACTION_NAMES.get(action, action)}  gagal  ({source_label})")
             if self.actions.size() > 50:
                 self.actions.delete(50, "end")
@@ -374,7 +423,13 @@ class Prototype:
         self.show_slide()
         text = f"{ACTION_NAMES.get(action, action)}  →  slide {slide}" + ("" if moved else "  (tidak berubah)")
         self.set_command(text, "ok" if moved else "warn")
-        self.actions.insert(0, f"{datetime.now():%H:%M:%S}  {text}  ({source_label})")
+        latency = ""
+        if timing:
+            self.root.update_idletasks()  # include redrawing the slide panel in L2
+            record = self.record_latency({**timing, "action_done_at": time.perf_counter()},
+                                         source, text, action, outcome="moved" if moved else "unchanged")
+            latency = f", {record['l2_ms']:.0f} ms" if record and record["l2_ms"] is not None else ""
+        self.actions.insert(0, f"{datetime.now():%H:%M:%S}  {text}  ({source_label}{latency})")
         if self.actions.size() > 50:
             self.actions.delete(50, "end")
         self.log("slide_action", target=target, action=action, source=source, slide=slide, moved=moved,

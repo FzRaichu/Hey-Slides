@@ -344,6 +344,11 @@ def build_settings(ui):
     ui.mode_box = _option_menu(setup, ui.command_mode, list(config.COMMAND_MODES.values()),
                                command=lambda value: ui.change_command_mode())
     ui.mode_box.pack(fill="x", padx=8)
+    caption(setup, "Jeda akhir perintah")
+    ui.endpoint_box = _option_menu(setup, ui.endpoint_choice, list(config.ENDPOINT_SILENCE_OPTIONS.values()))
+    ui.endpoint_box.pack(fill="x", padx=8)
+    note(setup, "Lama hening sebelum perintah dijalankan. Lebih pendek = lebih cepat, tetapi"
+                " perintah panjang bisa terpotong.", pady=(2, 0))
     check_style = dict(font=font(13), text_color=t["ink"], fg_color=t["accent"], hover_color=t["accent_hover"],
                        border_color=t["idle"], checkbox_width=20, checkbox_height=20, corner_radius=5)
     ui.assist_check = ctk.CTkCheckBox(setup, text="Command assist (disarankan untuk demo)",
@@ -358,9 +363,13 @@ def build_settings(ui):
     note(setup, "Default demo: Light English + Direct commands + Command assist.\n"
                 "Pengaturan audio dikunci selama sesi. Rekaman mati secara default.", pady=(8, 0))
 
-    caption(diagnostics, "Pengukuran pemrosesan")
-    note(diagnostics, textvariable=ui.timing)
-    note(diagnostics, "Angka ini bukan latensi suara-ke-slide. Target 200 ms belum tervalidasi.", pady=(6, 10))
+    caption(diagnostics, "Latensi suara")
+    ctk.CTkLabel(diagnostics, textvariable=ui.latency, font=font(13, "bold"), text_color=t["ink"],
+                 anchor="w", justify="left", wraplength=480).pack(fill="x", padx=8)
+    note(diagnostics, "Diukur dari akhir kata terakhir (timestamp Vosk). L1 = teks tampil, L2 = slide"
+                      " berpindah. Semua sampel tersimpan di logs\\session-*.jsonl; ringkas dengan"
+                      " python -m scripts.latency_report.", pady=(4, 6))
+    note(diagnostics, textvariable=ui.timing, pady=(0, 10))
     caption(diagnostics, "Tes parser tanpa pengenalan suara")
     note(diagnostics, "Tes ini melewati ASR dan dapat menggerakkan target slide.\n"
                       "Hasilnya bukan bukti keberhasilan pengenalan suara.", pady=(0, 8))

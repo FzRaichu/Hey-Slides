@@ -23,6 +23,16 @@ if (-not (Test-Path (Join-Path $modelSource "am\final.mdl"))) {
     throw "Missing model at $modelSource. Run: .venv\Scripts\python.exe -m scripts.download_model"
 }
 
+# PyInstaller --noconfirm empties dist\HeySlides, including recordings and session
+# logs the exe wrote to dist\HeySlides\logs. Keep them outside and restore after.
+$distLogs = Join-Path $root "dist\HeySlides\logs"
+$savedLogs = Join-Path $root "dist\HeySlides-logs-kept"
+if ((Test-Path $distLogs) -and (Get-ChildItem $distLogs -Force | Select-Object -First 1)) {
+    if (Test-Path $savedLogs) { throw "$savedLogs already exists from an earlier build. Move its files back or away first." }
+    Write-Host "Keeping exe logs/recordings: $distLogs -> $savedLogs"
+    Move-Item $distLogs $savedLogs
+}
+
 Write-Host "Running PyInstaller..."
 & $python -m PyInstaller `
     --noconfirm --clean `
@@ -35,7 +45,7 @@ Write-Host "Running PyInstaller..."
     --exclude-module ctranslate2 `
     --exclude-module torch `
     voice_slide_control.py
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE (exe logs, if any, are in $savedLogs)" }
 
 $dist = Join-Path $root "dist\HeySlides"
 $modelTarget = Join-Path $dist "models\$modelName"
@@ -60,6 +70,12 @@ $zip = Join-Path $root "dist\HeySlides-win64.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Write-Host "Creating $zip ..."
 Compress-Archive -Path $dist -DestinationPath $zip
+
+# Restore only after zipping, so personal recordings never go into the shared zip.
+if (Test-Path $savedLogs) {
+    Move-Item $savedLogs $distLogs
+    Write-Host "Restored exe logs/recordings to $distLogs (not included in the zip)"
+}
 
 $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host "Done. Folder: $dist"

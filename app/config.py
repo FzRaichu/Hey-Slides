@@ -80,6 +80,12 @@ MODEL_PROFILES = {
 }
 DEFAULT_MODEL_PROFILE = "light"
 
+# Trailing silence (s) before Vosk finalizes an utterance; commands run only on finals.
+# 0.3 s measured best on the 23 Nov 2026 recording (19/20 correct, ~280 ms faster than
+# 0.5 s); see report/Latency_Evaluation_2026-11-23.md.
+ENDPOINT_SILENCE_OPTIONS = {0.3: "Cepat: jeda 0,3 s (disarankan)", 0.5: "Default Vosk: jeda 0,5 s"}
+DEFAULT_ENDPOINT_SILENCE = 0.3
+
 
 def model_path(profile=DEFAULT_MODEL_PROFILE):
     if profile not in MODEL_PROFILES:

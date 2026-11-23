@@ -1,5 +1,6 @@
 """Microphone worker. Tkinter stays on the main thread; audio callbacks only queue."""
 
+from collections import deque
 import queue
 import threading
 import time
@@ -14,13 +15,51 @@ from app.recognition import StreamingRecognizer, load_model
 from app.command_recognition import CommandRecognizer, align_command_endpoint
 
 
+class AudioTimeline:
+    """Map a stream sample position to the perf_counter time it reached the app.
+
+    Each audio block is stored as (sample index just after the block, callback time).
+    A sample inside a block was captured (block_end - sample) / rate seconds before
+    the callback fired. Driver/hardware input latency before the callback is not
+    visible here, so latencies measured from this are from "audio reached the app".
+    """
+
+    def __init__(self, sample_rate, max_blocks=4000):
+        self.sample_rate = sample_rate
+        self.blocks = deque(maxlen=max_blocks)  # ~100 s of 25 ms blocks
+        self.samples = 0
+
+    def add(self, n_samples, received_at):
+        self.samples += n_samples
+        self.blocks.append((self.samples, received_at))
+
+    def time_of(self, sample):
+        match = None
+        for end, received_at in reversed(self.blocks):
+            if end < sample:
+                break
+            match = (end, received_at)
+        if match is None:
+            return None
+        end, received_at = match
+        return received_at - (end - sample) / self.sample_rate
+
+
+def speech_end_at(words, base_sample, timeline):
+    """perf_counter time of the end of the last recognized word, or None."""
+    ends = [float(word["end"]) for word in words or [] if "end" in word]
+    if not ends:
+        return None
+    return timeline.time_of(base_sample + round(max(ends) * timeline.sample_rate))
+
+
 class MicrophoneSession:
     def __init__(self):
         self.events = queue.Queue()
         self._stop = threading.Event()
         self._thread = None
         self._model = None
-        self._model_profile = None
+        self._model_key = None
         self.session_id = ""
 
     @property
@@ -28,7 +67,8 @@ class MicrophoneSession:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self, device=None, model_profile=config.DEFAULT_MODEL_PROFILE,
-              command_assist=True, record_audio=False, command_mode="wake"):
+              command_assist=True, record_audio=False, command_mode="wake",
+              endpoint_silence=config.DEFAULT_ENDPOINT_SILENCE):
         if command_mode not in config.COMMAND_MODES:
             raise ValueError("Unknown command mode")
         if self.running:
@@ -37,7 +77,8 @@ class MicrophoneSession:
         self.session_id = uuid.uuid4().hex
         model_dir = config.model_path(model_profile)
         self._thread = threading.Thread(target=self._run,
-                                        args=(device, model_profile, model_dir, command_assist, record_audio, command_mode), daemon=True)
+                                        args=(device, model_profile, model_dir, command_assist, record_audio, command_mode,
+                                              endpoint_silence), daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -46,7 +87,8 @@ class MicrophoneSession:
     def _emit(self, kind, **payload):
         self.events.put({"kind": kind, "session_id": self.session_id, **payload})
 
-    def _run(self, device, model_profile, model_dir, command_assist=True, record_audio=False, command_mode="wake"):
+    def _run(self, device, model_profile, model_dir, command_assist=True, record_audio=False, command_mode="wake",
+             endpoint_silence=config.DEFAULT_ENDPOINT_SILENCE):
         profile_settings = config.MODEL_PROFILES[model_profile]
         audio = queue.Queue(maxsize=profile_settings["queue_blocks"])
         max_age_ms = profile_settings["max_queue_ms"]
@@ -69,14 +111,16 @@ class MicrophoneSession:
         try:
             import sounddevice as sd
             self._emit("status", text=f"Loading {config.MODEL_PROFILES[model_profile]['label']}...")
-            if self._model is None or self._model_profile != model_profile:
-                # Release the previous model before loading another profile.
+            if self._model is None or self._model_key != (model_profile, endpoint_silence):
+                # Release the previous model before loading another profile or endpoint setting.
                 self._model = None
-                self._model = load_model(model_dir)
-                self._model_profile = model_profile
+                self._model = load_model(model_dir, endpoint_silence)
+                self._model_key = (model_profile, endpoint_silence)
             if self._stop.is_set():
                 return
             recognizer = StreamingRecognizer(self._model, config.SAMPLE_RATE)
+            # Pay Vosk's one-time first-decode cost before the microphone opens.
+            general_base = -recognizer.warm_up(config.SAMPLE_RATE)
             command_recognizer = CommandRecognizer(self._model, config.SAMPLE_RATE,
                                                   require_prefix=command_mode == "wake") if command_assist else None
             extractor = ManualMFCC()
@@ -84,6 +128,12 @@ class MicrophoneSession:
             last_features = 0.0
             utterance = 0
             command_utterance = 0
+            timeline = AudioTimeline(config.SAMPLE_RATE)
+            # Word times from each Vosk recognizer start at 0 when it is created.
+            # The general recognizer lives for the whole session (its times include
+            # the warm-up audio, hence general_base); the command recognizer is
+            # recreated at every general endpoint.
+            command_base = 0
             sd.check_input_settings(device=device, samplerate=config.SAMPLE_RATE,
                                     channels=1, dtype="int16")
             if record_audio:
@@ -109,10 +159,14 @@ class MicrophoneSession:
                     if recording is not None:
                         recording.writeframesraw(pcm)
                         recorded_samples += len(pcm) // 2
+                    timeline.add(len(pcm) // 2, received_at)
                     event = recognizer.feed(pcm)
                     command_event = command_recognizer.feed(pcm) if command_recognizer else None
+                    event_base = command_base
                     if command_recognizer:
                         command_event = align_command_endpoint(event, command_event, command_recognizer)
+                        if event["kind"] == "final":  # align_command_endpoint reset the decoder
+                            command_base = timeline.samples
                     if (time.perf_counter() - received_at) * 1000 > max_age_ms:
                         raise RuntimeError(f"Recognition exceeded the {max_age_ms} ms stale-audio limit. Try Light English or reduce CPU load.")
                     if discontinuity.is_set():
@@ -123,13 +177,19 @@ class MicrophoneSession:
                         if event["kind"] == "final":
                             utterance += 1
                         kind = event.pop("kind")
-                        self._emit(kind, **event, utterance_id=f"{self.session_id}:{utterance}",
+                        timing = {}
+                        if kind == "final":
+                            timing = {"speech_end_at": speech_end_at(event["words"], general_base, timeline),
+                                      "emitted_at": time.perf_counter()}
+                        self._emit(kind, **event, **timing, utterance_id=f"{self.session_id}:{utterance}",
                                    queue_ms=age_ms, allow_action=not command_assist,
                                    transcript_only=command_assist)
                     if command_event and command_event["kind"] == "final" and command_event["text"]:
                         command_utterance += 1
                         command_event.pop("kind")
                         self._emit("command_final", **command_event,
+                                   speech_end_at=speech_end_at(command_event["words"], event_base, timeline),
+                                   emitted_at=time.perf_counter(),
                                    utterance_id=f"{self.session_id}:command:{command_utterance}",
                                    allow_action=True)
                     samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0

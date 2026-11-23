@@ -180,6 +180,52 @@ this version. The original `requirements.txt`, dataset scripts, root planning
 documents, and Bab 1–3 draft describe the earlier MFCC/SVM direction and have
 not yet been consolidated or rewritten.
 
+## Voice latency measurement
+
+Every final recognition result is logged as a `latency` record in
+`logs\session-*.jsonl`, measured from the end of the last recognized word (Vosk word
+timestamps mapped to the time each 25 ms audio block reached the app; driver input
+latency before the callback is not included):
+
+- `endpoint_ms`: word end → recognizer emitted the final result (Vosk trailing-silence wait)
+- `l1_ms`: word end → text shown in the transcript
+- `l2_ms`: word end → slide changed and redrawn (executed commands only)
+
+The last values are shown in Pengaturan → Diagnostik and in each Riwayat aksi row.
+Summarize a measurement session (speak about 20 commands, then Stop):
+
+```powershell
+& '.venv\Scripts\python.exe' -m scripts.latency_report --out logs\latency-summary.md --csv logs\latency.csv
+```
+
+`scripts.endpoint_sweep` replays a recorded WAV (enable "Rekam input" in Pengaturan)
+with different Vosk endpoint silence settings and reports the endpoint wait and when
+the complete command first appeared as a partial result:
+
+```powershell
+& '.venv\Scripts\python.exe' -m scripts.endpoint_sweep logs\input-<session>.wav --silence 0.5 0.3 0.2 --expect next,previous,goto:3
+```
+
+On a synthetic Windows TTS recording (4 commands), the live app measured L2 median
+≈1015 ms, almost all of it the endpoint wait (≈940 ms). Lowering the endpoint silence
+from 0.5 s to 0.2 s cut the offline wait from ≈905 ms to ≈560 ms, while the full
+command text already appeared as a partial ≈205 ms after the last word. These are
+TTS numbers only; real speakers must be measured with the commands above.
+
+**Endpoint silence (default 0.3 s).** Commands run only on final results, and Vosk
+finalizes after a stretch of silence. Pengaturan → "Jeda akhir perintah" chooses
+0.3 s (default, measured best on the 23 Nov recording: 19–20/20 correct, L2 median
+≈1032 → ≈737 ms) or the Vosk default 0.5 s. Vosk 0.3.45 reads this from
+`conf/model.conf` at load time, so the app rewrites endpoint rules 2–4 there and keeps
+the first original as `model.conf.original`. Offline scripts that load the model
+afterwards use the same setting; `scripts.endpoint_sweep` sets its own values. See
+`report/Latency_Evaluation_2026-11-23.md`.
+
+At session start the general recognizer decodes 2 s of synthetic audio and resets
+(`StreamingRecognizer.warm_up`). Without this, the first spoken word triggered a
+one-time ≈560 ms decode that could exceed the 500 ms stale-audio limit and stop
+listening.
+
 ## Portable Windows build (.exe)
 
 Build a folder that runs on Windows 10/11 without Python or internet. Do this after
