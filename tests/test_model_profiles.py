@@ -41,17 +41,20 @@ class ModelProfileTests(unittest.TestCase):
         stream.__enter__.side_effect = lambda: session.stop()
         recognizer = MagicMock()
         recognizer.finish.return_value = {"text": ""}
-        with patch("app.session.load_model", side_effect=[object(), object()]) as load, \
+        with patch("app.session.load_model", side_effect=[object(), object(), object()]) as load, \
              patch("app.session.StreamingRecognizer", return_value=recognizer), \
              patch("sounddevice.check_input_settings"), \
              patch("sounddevice.RawInputStream", return_value=stream):
-            for profile in ("light", "light", "balanced"):
+            for profile, endpoint in (("light", 0.3), ("light", 0.3), ("balanced", 0.3), ("balanced", 0.5)):
                 session._stop.clear()
-                session._run(None, profile, config.model_path(profile), command_assist=False)
-            self.assertEqual(load.call_count, 2)
-            self.assertEqual(load.call_args_list[0].args[0], config.model_path("light"))
-            self.assertEqual(load.call_args_list[1].args[0], config.model_path("balanced"))
-            self.assertEqual(session._model_profile, "balanced")
+                session._run(None, profile, config.model_path(profile), command_assist=False,
+                             endpoint_silence=endpoint)
+            # Same profile + endpoint reuses the model; a new profile or endpoint reloads it.
+            self.assertEqual(load.call_count, 3)
+            self.assertEqual(load.call_args_list[0].args, (config.model_path("light"), 0.3))
+            self.assertEqual(load.call_args_list[1].args, (config.model_path("balanced"), 0.3))
+            self.assertEqual(load.call_args_list[2].args, (config.model_path("balanced"), 0.5))
+            self.assertEqual(session._model_key, ("balanced", 0.5))
         events = []
         while not session.events.empty():
             events.append(session.events.get_nowait())
